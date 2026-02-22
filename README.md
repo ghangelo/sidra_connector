@@ -10,18 +10,16 @@ Este projeto visa otimizar o fluxo de trabalho de análise geoespacial, eliminan
 
 | QGIS | Qt | Status |
 |---|---|---|
-| 3.x (até 3.38) | Qt5 / PyQt5 | ✅ Compatível |
+| 3.x | Qt5 / PyQt5 | ✅ Compatível |
 | 3.40+ | Qt6 / PyQt6 | ✅ Compatível |
 | 4.x (futuro) | Qt6 / PyQt6 | ✅ Pronto |
 
-O plugin utiliza a camada de compatibilidade `qgis.PyQt`, portanto funciona em ambas as versões do Qt sem necessidade de alterações.
-
-**Dependências:** Apenas a biblioteca padrão do Python e `requests` (já incluída no QGIS). Não requer `pandas` nem nenhum pacote externo.
+**Dependências:** Apenas a biblioteca padrão do Python e `requests` (já incluída no QGIS).
 
 ## Funcionalidades
 
 *   **Assistente de Busca:** Pesquise tabelas do IBGE por nome ou ID com busca dinâmica em tempo real e construa URLs da API de forma interativa e guiada.
-*   **Download de Malhas Vetoriais:** Baixe malhas territoriais (municípios, estados, etc.) do IBGE como camadas temporárias no QGIS — sem arquivos residuais em disco.
+*   **Download de Malhas Vetoriais:** Baixe malhas territoriais (municípios, estados, etc.) do IBGE como camadas no QGIS.
 *   **União de Dados:** Vincule os dados estatísticos baixados do SIDRA com as camadas vetoriais correspondentes de forma automática.
 
 ## Como Usar
