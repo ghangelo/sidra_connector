@@ -18,6 +18,8 @@ import zipfile
 import tempfile
 import shutil
 import re
+
+from qgis.core import QgsMessageLog, Qgis
 from ..utils import constants
 
 
@@ -96,15 +98,21 @@ class MeshDownloader:
                         progress = (bytes_downloaded / total_size) * 100
                         progress_callback(progress)
 
-            # Extrai e localiza o .shp dentro do .zip
+            # Extrai e localiza o .shp dentro do .zip (com proteção Zip Slip)
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                shapefile_name = next(
-                    (name for name in zip_ref.namelist() if name.lower().endswith('.shp')),
-                    None,
-                )
+                shapefile_name = None
+                for member in zip_ref.infolist():
+                    # Rejeitar caminhos absolutos e travessias de diretório (Zip Slip)
+                    if member.filename.startswith('/') or '..' in member.filename:
+                        raise ValueError(
+                            f"Caminho inseguro detectado no .zip: {member.filename}"
+                        )
+                    zip_ref.extract(member, self.temp_dir_path)
+                    if member.filename.lower().endswith('.shp'):
+                        shapefile_name = member.filename
+
                 if not shapefile_name:
                     raise FileNotFoundError("Nenhum ficheiro .shp encontrado no arquivo .zip.")
-                zip_ref.extractall(self.temp_dir_path)
                 return os.path.join(self.temp_dir_path, shapefile_name)
 
         except requests.exceptions.RequestException as e:
@@ -124,5 +132,8 @@ class MeshDownloader:
         try:
             if self.temp_dir_path and os.path.exists(self.temp_dir_path):
                 shutil.rmtree(self.temp_dir_path)
-        except Exception:
-            pass
+        except Exception as e:
+            QgsMessageLog.logMessage(
+                f"Erro ao limpar temporários: {e}",
+                "SIDRA Connector", Qgis.Warning,
+            )

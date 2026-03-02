@@ -16,10 +16,11 @@ A UI é carregada dinamicamente a partir do ``.ui`` (compatível Qt5/Qt6).
 
 import os
 
-from qgis.core import Qgis
+from qgis.core import Qgis, QgsMessageLog
 from qgis.PyQt import QtWidgets, uic
 
 from .query_builder_dialog import QueryBuilderDialog
+from ..core.mesh_downloader import fetch_available_years
 
 # Carrega a classe do formulário diretamente do .ui (sem pyuic5/pyuic6)
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
@@ -52,7 +53,7 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         # Botão criado programaticamente (não existe no .ui) para abrir
         # o assistente de busca de tabelas SIDRA.
         self.btn_query_builder = QtWidgets.QPushButton("Buscar Tabela...")
-        self.verticalLayout_2.insertWidget(2, self.btn_query_builder)
+        self.verticalLayout_2.addWidget(self.btn_query_builder)
         self.btn_query_builder.clicked.connect(self.open_query_builder)
 
         # --- Sinais ---
@@ -69,8 +70,21 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         self.on_layer_selection_changed()
 
     def populate_malha_comboboxes(self):
-        """Popula as comboboxes de ano, UF e tipo de malha."""
-        self.cb_ano_malha.addItems([str(y) for y in range(2024, 1999, -1)])
+        """Popula as comboboxes de ano, UF e tipo de malha.
+
+        Tenta obter os anos disponíveis dinamicamente do GeoFTP do IBGE.
+        Em caso de falha de rede, usa uma lista estática como fallback.
+        """
+        try:
+            anos = fetch_available_years()
+        except ConnectionError as e:
+            QgsMessageLog.logMessage(
+                f"Não foi possível obter anos do IBGE, usando lista estática: {e}",
+                "SIDRA Connector", Qgis.Warning,
+            )
+            anos = [str(y) for y in range(2024, 1999, -1)]
+
+        self.cb_ano_malha.addItems(anos)
         self.cb_localidade_malha.addItems(constants.UFS.keys())
         self.cb_tipo_malha.addItems(constants.MALHAS.keys())
 

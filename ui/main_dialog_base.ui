@@ -146,15 +146,8 @@
        <height>40</height>
       </size>
      </property>
-     <property name="font">
-      <font>
-       <pointsize>10</pointsize>
-       <weight>75</weight>
-       <bold>true</bold>
-      </font>
-     </property>
      <property name="text">
-      <string>Buscar Dados e Unir à Camada Alvo</string>
+      <string>Unir à Camada Alvo</string>
      </property>
     </widget>
    </item>

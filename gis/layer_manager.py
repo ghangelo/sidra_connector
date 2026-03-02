@@ -80,10 +80,12 @@ def file_layer_to_memory(file_layer, name):
     if not file_layer or not file_layer.isValid():
         return None
 
-    # Monta a URI de memória com tipo de geometria e CRS
+    # Monta a URI de memória apenas com o tipo de geometria;
+    # o CRS é aplicado explicitamente via setCrs() para cobrir CRS
+    # sem authid (ex.: projeções customizadas).
     geom_type = QgsWkbTypes.displayString(file_layer.wkbType())
-    crs = file_layer.crs().authid()
-    mem_layer = QgsVectorLayer(f"{geom_type}?crs={crs}", name, "memory")
+    mem_layer = QgsVectorLayer(f"{geom_type}", name, "memory")
+    mem_layer.setCrs(file_layer.crs())
     mem_provider = mem_layer.dataProvider()
 
     # Copia a estrutura de campos (schema)

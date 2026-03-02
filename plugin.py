@@ -71,5 +71,4 @@ class SidraConnector:
         chamada para garantir que o estado da UI esteja limpo.
         """
         self.dialog = SidraConnectorDialog(self.iface, self.plugin_dir)
-        self.dialog.show()
         self.dialog.exec()
