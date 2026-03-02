@@ -9,7 +9,7 @@ utilizados pelos módulos ``mesh_downloader``, ``task_manager`` e
 
 # ---------------------------------------------------------------------------
 #  Mapeamento de UFs (nome completo → sigla IBGE)
-#  Inclui "Brasil" para download de malhas nacionais.
+#  Inclui "Brasil" para download de malhas em niveis nacionais.
 # ---------------------------------------------------------------------------
 UFS = {
     "Brasil": "BR", "Acre": "AC", "Alagoas": "AL", "Amapá": "AP",
