@@ -83,27 +83,39 @@ class MeshDownloader:
         try:
             zip_path = os.path.join(self.temp_dir_path, 'download.zip')
 
-            # Download em streaming para não carregar o .zip inteiro na RAM
-            response = requests.get(self.url, stream=True, timeout=constants.DOWNLOAD_TIMEOUT)
-            response.raise_for_status()
+            # Download em streaming dentro de um context manager para
+            # garantir que o socket é fechado mesmo em caso de falha.
+            with requests.get(self.url, stream=True, timeout=constants.DOWNLOAD_TIMEOUT) as response:
+                response.raise_for_status()
 
-            total_size = int(response.headers.get('content-length', 0))
-            bytes_downloaded = 0
+                total_size = int(response.headers.get('content-length', 0))
+                bytes_downloaded = 0
 
-            with open(zip_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=constants.CHUNK_SIZE):
-                    f.write(chunk)
-                    bytes_downloaded += len(chunk)
-                    if progress_callback and total_size > 0:
-                        progress = (bytes_downloaded / total_size) * 100
-                        progress_callback(progress)
+                with open(zip_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=constants.CHUNK_SIZE):
+                        f.write(chunk)
+                        bytes_downloaded += len(chunk)
+                        if progress_callback and total_size > 0:
+                            progress = (bytes_downloaded / total_size) * 100
+                            progress_callback(progress)
 
             # Extrai e localiza o .shp dentro do .zip (com proteção Zip Slip)
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 shapefile_name = None
                 for member in zip_ref.infolist():
-                    # Rejeitar caminhos absolutos e travessias de diretório (Zip Slip)
-                    if member.filename.startswith('/') or '..' in member.filename:
+                    # Rejeitar caminhos absolutos (cross-platform) e travessias
+                    # de diretório (Zip Slip)
+                    if os.path.isabs(member.filename) or '..' in member.filename:
+                        raise ValueError(
+                            f"Caminho inseguro detectado no .zip: {member.filename}"
+                        )
+                    # Verificação extra: o caminho resolvido deve ficar dentro
+                    # do diretório temporário
+                    target_path = os.path.realpath(
+                        os.path.join(self.temp_dir_path, member.filename)
+                    )
+                    safe_dir = os.path.realpath(self.temp_dir_path)
+                    if not target_path.startswith(safe_dir + os.sep) and target_path != safe_dir:
                         raise ValueError(
                             f"Caminho inseguro detectado no .zip: {member.filename}"
                         )

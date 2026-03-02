@@ -20,9 +20,45 @@ pelo script ``dev/criar_db.py``).
 import os
 import sqlite3
 from qgis.PyQt import QtWidgets, QtCore
+from qgis.PyQt.QtCore import QThread, pyqtSignal
 from qgis.core import QgsMessageLog, Qgis
 
 from ..core.api_helpers import get_metadata_from_api, montar_url_interativa
+
+# Constante compatível com Qt5 (QGIS ≤ 3.38) e Qt6 (QGIS 3.40+).
+try:
+    USER_ROLE = QtCore.Qt.ItemDataRole.UserRole
+except AttributeError:
+    USER_ROLE = QtCore.Qt.UserRole
+
+try:
+    MULTI_SELECTION = QtWidgets.QAbstractItemView.SelectionMode.MultiSelection
+except AttributeError:
+    MULTI_SELECTION = QtWidgets.QAbstractItemView.MultiSelection
+
+try:
+    DIALOG_ACCEPTED = QtWidgets.QDialog.DialogCode.Accepted
+except AttributeError:
+    DIALOG_ACCEPTED = QtWidgets.QDialog.Accepted
+
+
+class _MetadataWorker(QThread):
+    """Thread auxiliar para buscar metadados sem bloquear a GUI.
+
+    Sinais:
+    - ``resultReady(object)`` — metadados recebidos (``dict`` ou ``None``).
+    """
+
+    resultReady = pyqtSignal(object)  # dict ou None
+
+    def __init__(self, table_id, parent=None):
+        super().__init__(parent)
+        self.table_id = table_id
+
+    def run(self):
+        """Executado em thread separada — chama a API de metadados."""
+        result = get_metadata_from_api(self.table_id)
+        self.resultReady.emit(result)
 
 
 class QueryBuilderDialog(QtWidgets.QDialog):
@@ -110,6 +146,9 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.perform_search)
         
+        # Referência para worker de metadados (para poder esperar na saída)
+        self._metadata_worker = None
+
         # Conectar eventos
         self.le_search.textChanged.connect(self.on_search_text_changed)
         self.btn_clear.clicked.connect(self.clear_search)
@@ -117,6 +156,14 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.btn_build_query.clicked.connect(self.build_query)
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_ok.clicked.connect(self.accept)
+
+    def closeEvent(self, event):
+        """Garante que a thread de metadados é finalizada antes de fechar."""
+        if self._metadata_worker is not None and self._metadata_worker.isRunning():
+            self._metadata_worker.resultReady.disconnect(self._on_metadata_ready)
+            self._metadata_worker.quit()
+            self._metadata_worker.wait(3000)
+        super().closeEvent(event)
 
     def get_db_connection(self):
         """Abre conexão com ``agregados_ibge.db``.
@@ -172,8 +219,9 @@ class QueryBuilderDialog(QtWidgets.QDialog):
     def perform_search(self):
         """Chamado pelo timer de debounce — dispara ``search_tables``."""
         search_term = self.le_search.text().strip()
-        
-        if len(search_term) < 2:
+
+        min_chars = 1 if search_term.isdigit() else 2
+        if len(search_term) < min_chars:
             return
             
         self.lbl_status.setText("Buscando...")
@@ -239,7 +287,7 @@ class QueryBuilderDialog(QtWidgets.QDialog):
             if results:
                 for table_id, table_name, group_name in results:
                     item = QtWidgets.QListWidgetItem(f"[{table_id}] {table_name} ({group_name})")
-                    item.setData(QtCore.Qt.ItemDataRole.UserRole, table_id)
+                    item.setData(USER_ROLE, table_id)
                     self.list_results.addItem(item)
                 
                 # Atualizar status
@@ -267,7 +315,7 @@ class QueryBuilderDialog(QtWidgets.QDialog):
 
         :param item: ``QListWidgetItem`` clicado na lista de resultados.
         """
-        table_id = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        table_id = item.data(USER_ROLE)
         
         if table_id is None:
             # Item inválido (como mensagem de "nenhum resultado")
@@ -278,7 +326,29 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.btn_build_query.setEnabled(True)
 
     def build_query(self):
-        """Fluxo de 4 etapas para montar a URL completa da API SIDRA.
+        """Inicia a busca assíncrona de metadados da tabela selecionada.
+
+        A requisição HTTP é delegada a ``_MetadataWorker`` (QThread) para
+        não bloquear a interface gráfica. Quando a resposta chega,
+        ``_on_metadata_ready`` é chamado para prosseguir com o fluxo de
+        4 etapas de seleção.
+        """
+        if not hasattr(self, 'selected_table_id'):
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione uma tabela primeiro.")
+            return
+
+        # Desabilitar o botão enquanto a requisição está em andamento
+        self.btn_build_query.setEnabled(False)
+        self.btn_build_query.setText("A carregar metadados...")
+
+        self._metadata_worker = _MetadataWorker(
+            str(self.selected_table_id), parent=self
+        )
+        self._metadata_worker.resultReady.connect(self._on_metadata_ready)
+        self._metadata_worker.start()
+
+    def _on_metadata_ready(self, metadata):
+        """Callback: metadados recebidos — prossegue com as 4 etapas de seleção.
 
         Etapas (cada uma abre um ``show_selection_dialog``):
         1. Períodos — lista vinda de ``metadata['Periodos']``.
@@ -288,21 +358,18 @@ class QueryBuilderDialog(QtWidgets.QDialog):
 
         Ao final, a URL é montada por ``montar_url_interativa()``.
         """
-        if not hasattr(self, 'selected_table_id'):
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione uma tabela primeiro.")
-            return
-            
-        # Buscar metadados da tabela
-        metadata = get_metadata_from_api(str(self.selected_table_id))
-        
+        # Restaurar o botão independentemente do resultado
+        self.btn_build_query.setEnabled(True)
+        self.btn_build_query.setText("Construir Consulta")
+
         if not metadata:
             QtWidgets.QMessageBox.critical(
-                self, 
-                "Erro", 
+                self,
+                "Erro",
                 "Não foi possível obter os metadados da tabela. Verifique sua conexão com a internet."
             )
             return
-        
+
         try:
             # Selecionar períodos
             periodos_disponiveis = [
@@ -431,11 +498,11 @@ class QueryBuilderDialog(QtWidgets.QDialog):
             info_extra = f" ({option[2]})" if len(option) > 2 and option[2] else ""
             
             item = QtWidgets.QListWidgetItem(f"{item_name} (ID: {item_id}){info_extra}")
-            item.setData(QtCore.Qt.ItemDataRole.UserRole, option)
+            item.setData(USER_ROLE, option)
             list_widget.addItem(item)
         
         if not single_selection:
-            list_widget.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
+            list_widget.setSelectionMode(MULTI_SELECTION)
         
         layout.addWidget(list_widget)
         
@@ -455,14 +522,14 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         btn_cancel.clicked.connect(dialog.reject)
         
         # Executar diálogo
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+        if dialog.exec() == DIALOG_ACCEPTED:
             selected_items = list_widget.selectedItems()
             
             if not selected_items:
                 QtWidgets.QMessageBox.warning(self, "Aviso", "Nenhum item selecionado.")
                 return None
                 
-            return [item.data(QtCore.Qt.ItemDataRole.UserRole) for item in selected_items]
+            return [item.data(USER_ROLE) for item in selected_items]
         
         return None
 

@@ -93,7 +93,8 @@ def file_layer_to_memory(file_layer, name):
     mem_layer.updateFields()
 
     # Copia todas as feições (geometria + atributos)
-    mem_provider.addFeatures(list(file_layer.getFeatures()))
+    # Passa o iterador diretamente para evitar carregar todas as feições na RAM.
+    mem_provider.addFeatures(file_layer.getFeatures())
     mem_layer.updateExtents()
 
     return mem_layer if mem_layer.isValid() else None

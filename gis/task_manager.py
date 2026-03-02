@@ -169,6 +169,11 @@ class DownloadAndLoadLayerTask(QgsTask):
                 else None
             )
 
+            # Libera explicitamente a referência OGR antes de limpar os
+            # ficheiros temporários — no Windows o provider mantém um lock
+            # no .shp que impede shutil.rmtree de apagar a pasta.
+            del file_layer
+
             # Agora é seguro apagar os ficheiros temporários
             if self.downloader:
                 self.downloader.cleanup()

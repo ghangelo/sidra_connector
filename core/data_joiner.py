@@ -20,7 +20,6 @@ from qgis.core import (
     QgsFeature,
     QgsFields,
     QgsWkbTypes,
-    edit,
     Qgis,
 )
 from qgis.PyQt.QtCore import QVariant
@@ -106,31 +105,43 @@ class DataJoiner:
             base_name = safe_class[:40]
             field_name = f"{base_name}"
 
+            # Limite do QGIS para nomes de campo: 63 caracteres.
+            # Trunca ANTES de verificar unicidade para garantir que o
+            # nome final (incluindo sufixo numérico) jamais colida.
+            if len(field_name) > 60:
+                field_name = field_name[:60]
+
             # Garantir unicidade do nome
             counter = 1
             original_field_name = field_name
             while field_name in used_field_names:
                 field_name = f"{original_field_name}_{counter}"
                 counter += 1
-
-            # Limite do QGIS para nomes de campo: 63 caracteres
-            if len(field_name) > 60:
-                field_name = field_name[:60]
+                # Ré-truncar caso o sufixo numérico exceda o limite
+                if len(field_name) > 60:
+                    trim = len(field_name) - 60
+                    field_name = f"{original_field_name[:-trim]}_{counter - 1}"
 
             used_field_names.add(field_name)
 
             if new_fields.indexFromName(field_name) == -1:
-                new_fields.append(QgsField(field_name, QVariant.Double))
+                # Usa String em vez de Double para preservar marcações de
+                # censura do IBGE ("X", "-", "..", etc.). Valores numéricos
+                # são convertidos para float na atribuição quando possível.
+                new_fields.append(QgsField(field_name, QVariant.String))
             field_map[class_value] = field_name
 
         # ------------------------------------------------------------------
         # 2. Criar a camada temporária de resultado
         # ------------------------------------------------------------------
+        # Monta a URI apenas com o tipo de geometria; o CRS é aplicado
+        # via setCrs() para suportar projeções customizadas sem authid.
         temp_layer = QgsVectorLayer(
-            f"{QgsWkbTypes.displayString(self.target_layer.wkbType())}?crs={self.target_layer.crs().authid()}",
+            f"{QgsWkbTypes.displayString(self.target_layer.wkbType())}",
             f"{self.target_layer.name()}_sidra",
             "memory",
         )
+        temp_layer.setCrs(self.target_layer.crs())
         provider = temp_layer.dataProvider()
         provider.addAttributes(new_fields)
         temp_layer.updateFields()
@@ -141,42 +152,49 @@ class DataJoiner:
         join_count = 0
         unmatched_keys_sample = []
         layer_keys_sample = []
+        new_features = []
 
-        with edit(temp_layer):
-            for feature in self.target_layer.getFeatures():
-                new_feat = QgsFeature(new_fields)
-                new_feat.setGeometry(feature.geometry())
-                # Copiar atributos originais
-                for i, field in enumerate(feature.fields()):
-                    new_feat.setAttribute(i, feature.attribute(i))
+        for feature in self.target_layer.getFeatures():
+            new_feat = QgsFeature(new_fields)
+            new_feat.setGeometry(feature.geometry())
+            # Copiar atributos originais
+            for i, field in enumerate(feature.fields()):
+                new_feat.setAttribute(i, feature.attribute(i))
 
-                raw_key = feature[self.join_field_name]
+            raw_key = feature[self.join_field_name]
 
-                # Normalizar chave: remover .0 de floats, strip de strings
-                normalized_layer_key = None
-                if raw_key is not None:
-                    try:
-                        normalized_layer_key = str(int(float(raw_key)))
-                    except (ValueError, TypeError):
-                        normalized_layer_key = str(raw_key).strip()
+            # Normalizar chave: remover .0 de floats, strip de strings
+            normalized_layer_key = None
+            if raw_key is not None:
+                try:
+                    normalized_layer_key = str(int(float(raw_key)))
+                except (ValueError, TypeError):
+                    normalized_layer_key = str(raw_key).strip()
 
-                # Coletar amostras para mensagens de diagnóstico
-                if len(layer_keys_sample) < 5 and normalized_layer_key:
-                    layer_keys_sample.append(normalized_layer_key)
+            # Coletar amostras para mensagens de diagnóstico
+            if len(layer_keys_sample) < 5 and normalized_layer_key:
+                layer_keys_sample.append(normalized_layer_key)
 
-                # Lookup no dicionário SIDRA
-                if normalized_layer_key and normalized_layer_key in self.sidra_data:
-                    join_count += 1
-                    for class_value, data_value in self.sidra_data[normalized_layer_key].items():
-                        field_name = field_map.get(class_value)
-                        if field_name:
-                            try:
-                                new_feat[field_name] = float(data_value)
-                            except (ValueError, TypeError):
-                                pass  # Mantém NULL se não for numérico
-                elif normalized_layer_key and len(unmatched_keys_sample) < 5:
-                    unmatched_keys_sample.append(normalized_layer_key)
+            # Lookup no dicionário SIDRA
+            if normalized_layer_key and normalized_layer_key in self.sidra_data:
+                join_count += 1
+                for class_value, data_value in self.sidra_data[normalized_layer_key].items():
+                    field_name = field_map.get(class_value)
+                    if field_name and data_value is not None:
+                        # Tenta gravar como número formatado; caso contrário
+                        # preserva a marcação original do IBGE ("X", "..", "-").
+                        try:
+                            new_feat[field_name] = str(float(data_value))
+                        except (ValueError, TypeError):
+                            new_feat[field_name] = str(data_value)
+            elif normalized_layer_key and len(unmatched_keys_sample) < 5:
+                unmatched_keys_sample.append(normalized_layer_key)
 
-                temp_layer.addFeature(new_feat)
+            new_features.append(new_feat)
+
+        # Adiciona todas as feições de uma vez via provider — muito mais
+        # rápido que edit() + addFeature() unitário.
+        provider.addFeatures(new_features)
+        temp_layer.updateExtents()
 
         return temp_layer, join_count, unmatched_keys_sample, layer_keys_sample

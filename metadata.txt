@@ -5,13 +5,13 @@
 [general]
 name=SIDRA Connector
 qgisMinimumVersion=3.0
-description=Um plugin para buscar unir dados da API SIDRA do IBGE com camadas vetoriais.
-version=2.0
+description=Busque dados da API SIDRA/IBGE e una-os a camadas vetoriais. Compatível com Qt5 e Qt6.
+version=2.1
 author=Gabriel Henrique Angelo
 email=angelo.henrique.gabriel@gmail.com
 supportsQt6=True
 
-about=Um plugin para buscar unir dados da API SIDRA do IBGE com camadas vetoriais.
+about=Plugin para buscar dados estatísticos do SIDRA/IBGE, baixar malhas territoriais do GeoFTP e unir tudo a camadas vetoriais dentro do QGIS. Inclui assistente de busca interativo, download assíncrono e suporte completo a Qt5 e Qt6.
 
 tracker=https://github.com/GaboV3/sidra_connector/issues
 repository=https://github.com/GaboV3/sidra_connector
@@ -20,11 +20,22 @@ repository=https://github.com/GaboV3/sidra_connector
 # Recommended items:
 
 hasProcessingProvider=no
-# Uncomment the following line and add your changelog:
-# changelog=
+changelog=
+  2.1 - Versão release Qt6
+    * Compatibilidade total Qt5 (QGIS ≤ 3.38) e Qt6 (QGIS 3.40+/4.x)
+    * Busca de metadados assíncrona (não bloqueia a GUI)
+    * Download de malhas em streaming com proteção Zip Slip
+    * União de dados via provider em lote (performance)
+    * CRS robusto via setCrs() (suporta projeções customizadas)
+    * Campos String para preservar marcações de censura do IBGE
+    * Captura de referências antes de dispatch assíncrono
+    * Proteção contra threads órfãs ao fechar diálogos
+    * Anos de malha obtidos dinamicamente do GeoFTP
+    * Timeout centralizado em constants.py
+  2.0 - Primeira versão pública
 
 # Tags are comma separated with spaces allowed
-tags=python
+tags=python, ibge, sidra, estatística, dados, malha, vetor, join, censo, qt6
 
 homepage=https://github.com/GaboV3/sidra_connector
 category=Plugins

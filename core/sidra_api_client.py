@@ -18,6 +18,8 @@ import requests
 import xml.etree.ElementTree as ET
 import re
 
+from ..utils import constants
+
 try:
     from qgis.core import QgsMessageLog, Qgis
     QGIS_AVAILABLE = True
@@ -114,7 +116,7 @@ class SidraApiClient:
                 final_url = f"{self.base_url}/{path_params}"
 
         try:
-            response = requests.get(final_url, timeout=30)
+            response = requests.get(final_url, timeout=constants.API_TIMEOUT)
             response.raise_for_status()
         except requests.exceptions.Timeout:
             raise TimeoutError(f"Timeout na requisição à API SIDRA: {final_url}")
@@ -352,7 +354,12 @@ class SidraApiClient:
                             row_data[col] = _parse_numeric(val)
 
                     if row_data:
-                        sidra_data_dict[geo_code] = row_data
+                        # Mescla com dados anteriores do mesmo geo_code em
+                        # vez de sobrescrever (múltiplas linhas por localidade).
+                        if geo_code in sidra_data_dict:
+                            sidra_data_dict[geo_code].update(row_data)
+                        else:
+                            sidra_data_dict[geo_code] = row_data
                         rows_processed += 1
 
         if QGIS_AVAILABLE:

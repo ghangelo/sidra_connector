@@ -10,9 +10,8 @@ Este projeto visa otimizar o fluxo de trabalho de análise geoespacial, eliminan
 
 | QGIS | Qt | Status |
 |---|---|---|
-| 3.x | Qt5 / PyQt5 | ✅ Compatível |
-| 3.40+ | Qt6 / PyQt6 | ✅ Compatível |
-| 4.x (futuro) | Qt6 / PyQt6 | ✅ Pronto |
+| 3.x | Qt5 / PyQt5 | ✅ |
+| 4.x | Qt6 / PyQt6 | ✅ |
 
 **Dependências:** Apenas a biblioteca padrão do Python e `requests` (já incluída no QGIS).
 
@@ -43,7 +42,7 @@ Este projeto visa otimizar o fluxo de trabalho de análise geoespacial, eliminan
 ### Finalização
 7.  **Download da Malha:** Opcionalmente, baixe uma malha vetorial correspondente usando a seção "Download de Malha".
 8.  **Selecionar Camada:** Escolha uma camada vetorial já carregada no seu projeto.
-9.  **Executar União:** Clique em "Buscar Dados e Unir à Camada Alvo" para processar e criar a nova camada com os dados unidos.
+9.  **Executar União:** Clique em "Unir à Camada Alvo" para processar e criar a nova camada com os dados unidos.
 
 ## Estrutura do Projeto
 

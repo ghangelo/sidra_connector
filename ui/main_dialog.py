@@ -29,6 +29,12 @@ from ..gis import layer_manager, task_manager
 from ..core.data_joiner import DataJoiner
 from ..utils import constants
 
+# Compatibilidade Qt5 (QGIS ≤ 3.38) / Qt6 (QGIS 3.40+).
+try:
+    DIALOG_ACCEPTED = QtWidgets.QDialog.DialogCode.Accepted
+except AttributeError:
+    DIALOG_ACCEPTED = QtWidgets.QDialog.Accepted
+
 
 class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
     """Janela principal do plugin — orquestra downloads, consultas e uniões.
@@ -77,7 +83,7 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         """
         try:
             anos = fetch_available_years()
-        except ConnectionError as e:
+        except (ConnectionError, ValueError) as e:
             QgsMessageLog.logMessage(
                 f"Não foi possível obter anos do IBGE, usando lista estática: {e}",
                 "SIDRA Connector", Qgis.Warning,
@@ -185,6 +191,12 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
             return
 
         self.iface.messageBar().pushMessage("SIDRA Connector", "Buscando dados na API...", level=Qgis.Info, duration=5)
+
+        # Captura referências antes do dispatch assíncrono para que a
+        # callback use a camada/campo que estavam selecionados no momento
+        # do clique — mesmo que o usuário altere a seleção enquanto espera.
+        self._pending_target_layer = target_layer
+        self._pending_join_field = join_field
         task_manager.run_fetch_task(api_url, self.on_fetch_success, self.on_fetch_error)
 
     def on_fetch_success(self, sidra_data, header_info):
@@ -210,8 +222,9 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
             )
             return
         
-        target_layer = self.cb_target_layer.currentData()
-        join_field = self.cb_target_field.currentText()
+        # Usa as referências capturadas no momento do clique (não da UI atual)
+        target_layer = self._pending_target_layer
+        join_field = self._pending_join_field
 
         try:
             joiner = DataJoiner(target_layer, join_field, sidra_data, header_info)
@@ -249,13 +262,13 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         """Abre o ``QueryBuilderDialog`` e preenche a URL ao aceitar."""
         dialog = QueryBuilderDialog(self.plugin_dir, self)
         
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+        if dialog.exec() == DIALOG_ACCEPTED:
             generated_url = dialog.get_generated_url()
             if generated_url:
                 self.le_api_url.setText(generated_url)
                 self.iface.messageBar().pushMessage(
                     "SIDRA Connector", 
-                    "URL da API inserida com sucesso. Agora selecione uma camada e clique em 'Buscar e Unir Dados'.", 
+                    "URL da API inserida com sucesso. Agora selecione uma camada e clique em 'Unir à Camada Alvo'.", 
                     level=Qgis.Info, 
                     duration=5
                 )
