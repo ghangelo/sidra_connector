@@ -6,7 +6,7 @@
 name=SIDRA Connector
 qgisMinimumVersion=3.0
 qgisMaximumVersion=4.99
-description=Busque dados da API SIDRA/IBGE e una-os a camadas vetoriais. Compatível com Qt5 e Qt6.
+description=Busque dados da API SIDRA/IBGE e una-os a camadas vetoriais.
 version=2.1
 author=Gabriel Henrique Angelo
 email=angelo.henrique.gabriel@gmail.com
@@ -22,6 +22,7 @@ repository=https://github.com/GaboV3/sidra_connector
 
 hasProcessingProvider=no
 changelog=
+  2.1.1 - Versão maxima corrigida.
   2.1 - Versão release Qt6
     * Compatibilidade total Qt5 (QGIS ≤ 3.38) e Qt6 (QGIS 3.40+/4.x)
     * Busca de metadados assíncrona (não bloqueia a GUI)
