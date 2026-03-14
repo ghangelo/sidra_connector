@@ -4,13 +4,12 @@
 
 [general]
 name=SIDRA Connector
-qgisMinimumVersion=3.0
+qgisMinimumVersion=3.22
 qgisMaximumVersion=4.99
 description=Busque dados da API SIDRA/IBGE e una-os a camadas vetoriais.
-version=2.1
+version=2.1.2
 author=Gabriel Henrique Angelo
 email=angelo.henrique.gabriel@gmail.com
-supportsQt6=True
 
 about=Plugin para buscar dados estatísticos do SIDRA/IBGE, baixar malhas territoriais do GeoFTP e unir tudo a camadas vetoriais dentro do QGIS.
 
@@ -22,6 +21,7 @@ repository=https://github.com/GaboV3/sidra_connector
 
 hasProcessingProvider=no
 changelog=
+  2.1.2 - Correção no metadata.txt
   2.1.1 - Versão maxima corrigida.
   2.1 - Versão release Qt6
     * Compatibilidade total Qt5 (QGIS ≤ 3.38) e Qt6 (QGIS 3.40+/4.x)
