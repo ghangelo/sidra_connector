@@ -22,8 +22,8 @@ Estrutura do JSON da API:
     ]
 
 Estrutura do banco gerado:
-    - grupos(id TEXT PK, nome TEXT)         → pesquisas/temas do IBGE
-    - agregados(id INTEGER PK, nome TEXT, grupo_id TEXT FK) → tabelas SIDRA
+    - grupos(id TEXT PK, nome TEXT)         -- pesquisas/temas do IBGE
+    - agregados(id INTEGER PK, nome TEXT, grupo_id TEXT FK) -- tabelas SIDRA
 
 Uso:
     python criar_db.py
@@ -86,7 +86,7 @@ def baixar_agregados(url: str) -> list:
             "Estrutura de JSON inesperada. Esperava-se uma lista de grupos."
         )
 
-    print(f"  → {len(dados)} grupos de pesquisa encontrados.")
+    print(f"  -> {len(dados)} grupos de pesquisa encontrados.")
     return dados
 
 
@@ -183,7 +183,7 @@ def popular_banco(conn: sqlite3.Connection, dados: list) -> None:
             total_agregados += 1
 
     conn.commit()
-    print(f"  → {total_grupos} grupos e {total_agregados} agregados inseridos.")
+    print(f"  -> {total_grupos} grupos e {total_agregados} agregados inseridos.")
 
 
 def main():

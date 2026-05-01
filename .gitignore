@@ -1,4 +1,5 @@
 __pycache__/
 *.pyc
 *.pyo
-*.db
+dev/*.db
+agregados_ibge_completo.db
