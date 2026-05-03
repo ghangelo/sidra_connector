@@ -197,18 +197,17 @@ class QueryBuilderDialog(QtWidgets.QDialog):
     def on_search_text_changed(self):
         """Debounce: reinicia timer de 500 ms a cada tecla digitada."""
         search_text = self.le_search.text().strip()
-        
+
         # Parar o timer anterior
         self.search_timer.stop()
-        
-        min_chars = 1 if search_text.isdigit() else 2
-        if len(search_text) < min_chars:
-            # Limpar resultados se o texto for muito curto
+
+        if not search_text:
+            # Limpar resultados se o campo estiver vazio
             self.list_results.clear()
-            self.lbl_status.setText("Digite um ID ou pelo menos 2 caracteres para buscar...")
+            self.lbl_status.setText("Digite o nome ou ID da tabela para buscar...")
             self.lbl_status.setStyleSheet("color: gray; font-style: italic;")
             return
-            
+
         # Iniciar novo timer de 500ms
         self.search_timer.start(500)
 
@@ -216,98 +215,117 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         """Restaura o campo de busca e a lista ao estado inicial."""
         self.le_search.clear()
         self.list_results.clear()
-        self.lbl_status.setText("Digite um ID ou pelo menos 2 caracteres para buscar...")
+        self.lbl_status.setText("Digite o nome ou ID da tabela para buscar...")
         self.lbl_status.setStyleSheet("color: gray; font-style: italic;")
 
     def perform_search(self):
         """Chamado pelo timer de debounce — dispara ``search_tables``."""
         search_term = self.le_search.text().strip()
-
-        min_chars = 1 if search_term.isdigit() else 2
-        if len(search_term) < min_chars:
+        if not search_term:
             return
-            
         self.lbl_status.setText("Buscando...")
         self.lbl_status.setStyleSheet("color: blue; font-style: italic;")
-        
-        # Realizar a busca
         self.search_tables(search_term)
 
     def search_tables(self, search_term=None):
         """Consulta ``agregados_ibge.db`` e preenche a lista de resultados.
 
-        Se *search_term* for numérico, faz busca por **prefixo de ID**
-        (``CAST(a.id AS TEXT) LIKE '<termo>%'``). Caso contrário, busca
-        por substring no nome da tabela ou do grupo.
+        A busca e insensivel a acentos e a ordem das palavras:
+        cada palavra do termo digitado deve aparecer em algum lugar
+        no nome da tabela ou do grupo (qualquer ordem, sem acento).
 
-        :param search_term: Texto digitado pelo usuário (ou ``None``).
+        Para IDs numericos, faz busca por prefixo.
+
+        :param search_term: Texto digitado pelo usuario (ou ``None``).
         """
+        import unicodedata
+
         if search_term is None:
             search_term = self.le_search.text().strip()
-        
-        is_numeric = search_term.isdigit()
 
-        if not is_numeric and len(search_term) < 2:
-            self.lbl_status.setText("Digite pelo menos 2 caracteres para iniciar a busca...")
-            self.lbl_status.setStyleSheet("color: gray; font-style: italic;")
+        if not search_term:
             return
 
         conn = self.get_db_connection()
         if not conn:
             return
-            
+
+        def _normalizar(texto):
+            """Remove acentos e converte para minusculas."""
+            if texto is None:
+                return ''
+            nfkd = unicodedata.normalize('NFKD', str(texto))
+            sem_acento = ''.join(c for c in nfkd if not unicodedata.combining(c))
+            return sem_acento.lower()
+
         try:
+            # Registrar funcao de normalizacao no SQLite
+            conn.create_function('norm', 1, _normalizar)
             cursor = conn.cursor()
-            
+
+            is_numeric = search_term.isdigit()
+
             if is_numeric:
                 # Busca por ID exato ou prefixo do ID
                 query = """
-                    SELECT a.id, a.nome, g.nome as grupo_nome 
-                    FROM agregados a 
-                    JOIN grupos g ON a.grupo_id = g.id 
+                    SELECT a.id, a.nome, g.nome as grupo_nome
+                    FROM agregados a
+                    JOIN grupos g ON a.grupo_id = g.id
                     WHERE CAST(a.id AS TEXT) LIKE ?
                     ORDER BY a.id
-                    LIMIT 50
                 """
                 cursor.execute(query, (f"{search_term}%",))
             else:
-                # Busca por nome da tabela ou grupo
-                query = """
-                    SELECT a.id, a.nome, g.nome as grupo_nome 
-                    FROM agregados a 
-                    JOIN grupos g ON a.grupo_id = g.id 
-                    WHERE a.nome LIKE ? OR g.nome LIKE ?
+                # Quebrar o termo em palavras e exigir que todas apareçam
+                # (em qualquer ordem) no nome normalizado da tabela ou grupo
+                tokens = _normalizar(search_term).split()
+
+                # Cada token gera uma condicao AND
+                # norm(a.nome) LIKE '%token%' OR norm(g.nome) LIKE '%token%'
+                where_parts = []
+                params = []
+                for tok in tokens:
+                    where_parts.append(
+                        "(norm(a.nome) LIKE ? OR norm(g.nome) LIKE ?)"
+                    )
+                    params.extend([f"%{tok}%", f"%{tok}%"])
+
+                where_clause = ' AND '.join(where_parts)
+                query = f"""
+                    SELECT a.id, a.nome, g.nome as grupo_nome
+                    FROM agregados a
+                    JOIN grupos g ON a.grupo_id = g.id
+                    WHERE {where_clause}
                     ORDER BY a.nome
-                    LIMIT 50
                 """
-                search_pattern = f"%{search_term}%"
-                cursor.execute(query, (search_pattern, search_pattern))
+                cursor.execute(query, params)
+
             results = cursor.fetchall()
-            
+
             # Limpar resultados anteriores
             self.list_results.clear()
-            
+
             if results:
                 for table_id, table_name, group_name in results:
-                    item = QtWidgets.QListWidgetItem(f"[{table_id}] {table_name} ({group_name})")
+                    item = QtWidgets.QListWidgetItem(
+                        f"[{table_id}] {table_name} ({group_name})"
+                    )
                     item.setData(USER_ROLE, table_id)
                     self.list_results.addItem(item)
-                
-                # Atualizar status
+
                 count = len(results)
-                max_text = " (mostrando primeiros 50)" if count == 50 else ""
-                self.lbl_status.setText(f"{count} resultado(s) encontrado(s){max_text}")
+                self.lbl_status.setText(f"{count} resultado(s) encontrado(s)")
                 self.lbl_status.setStyleSheet("color: green;")
             else:
                 self.lbl_status.setText("Nenhum resultado encontrado")
                 self.lbl_status.setStyleSheet("color: orange;")
-                
+
         except sqlite3.Error as e:
             self.lbl_status.setText(f"Erro na busca: {e}")
             self.lbl_status.setStyleSheet("color: red;")
             QtWidgets.QMessageBox.critical(
-                self, 
-                "Erro de Busca", 
+                self,
+                "Erro de Busca",
                 f"Erro ao buscar no banco de dados: {e}"
             )
         finally:
