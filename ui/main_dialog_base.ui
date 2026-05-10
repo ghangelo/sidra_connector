@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>500</width>
-    <height>550</height>
+    <height>480</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -53,7 +53,7 @@
       <item row="3" column="0" colspan="2">
        <widget class="QPushButton" name="btn_download_malha">
         <property name="text">
-         <string>Baixar e Carregar Malha na Camada</string>
+         <string>Baixar e Carregar Malha</string>
         </property>
        </widget>
       </item>
@@ -73,6 +73,7 @@
       <string>2. Montar Consulta</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_2">
+      <!-- URL e campo ocultos — preenchidos programaticamente pelo QueryBuilder -->
       <item>
        <widget class="QLabel" name="label">
         <property name="text">
@@ -80,6 +81,9 @@
         </property>
         <property name="wordWrap">
          <bool>true</bool>
+        </property>
+        <property name="visible">
+         <bool>false</bool>
         </property>
        </widget>
       </item>
@@ -90,6 +94,9 @@
         </property>
         <property name="placeholderText">
          <string>Ex: http://api.sidra.ibge.gov.br/values/t/5938/...</string>
+        </property>
+        <property name="visible">
+         <bool>false</bool>
         </property>
        </widget>
       </item>

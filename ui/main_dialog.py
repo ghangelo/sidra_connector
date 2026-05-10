@@ -63,6 +63,11 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         self.verticalLayout_2.addWidget(self.btn_query_builder)
         self.btn_query_builder.clicked.connect(self.open_query_builder)
 
+        # Indicador visual de que a consulta está pronta
+        self.lbl_query_status = QtWidgets.QLabel("")
+        self.lbl_query_status.setWordWrap(True)
+        self.verticalLayout_2.addWidget(self.lbl_query_status)
+
         # --- Sinais ---
         # Atualiza a lista de camadas sempre que o dropdown é aberto
         self.cb_target_layer.aboutToShowPopup.connect(self.populate_layers_combobox)
@@ -156,12 +161,21 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         task_manager.run_download_task(url, layer_name, self.on_download_success, self.on_download_error)
 
     def on_download_success(self, new_layer):
-        """Callback: malha baixada e carregada com sucesso."""
+        """Callback: malha baixada e carregada com sucesso.
+
+        Alem de notificar o usuario, seleciona automaticamente a
+        camada recem baixada na etapa 3, deixando-a pronta para o join.
+        """
         self.iface.messageBar().pushMessage(
             "Sucesso",
             f"Camada '{new_layer.name()}' carregada com sucesso!",
             level=Qgis.Success,
         )
+        # Recarrega o combobox e seleciona a camada recem adicionada
+        self.populate_layers_combobox()
+        index = self.cb_target_layer.findData(new_layer)
+        if index != -1:
+            self.cb_target_layer.setCurrentIndex(index)
 
     def on_download_error(self, error_message):
         """Callback: falha no download da malha."""
@@ -269,15 +283,22 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
     def open_query_builder(self):
         """Abre o ``QueryBuilderDialog`` e preenche a URL ao aceitar."""
         dialog = QueryBuilderDialog(self.plugin_dir, self)
-        
+
         if dialog.exec() == DIALOG_ACCEPTED:
             generated_url = dialog.get_generated_url()
             if generated_url:
                 self.le_api_url.setText(generated_url)
+                # Indicador verde de consulta pronta
+                self.lbl_query_status.setText(
+                    "Consulta pronta! Clique em 'Unir a Camada Alvo'."
+                )
+                self.lbl_query_status.setStyleSheet(
+                    "color: #2e7d32; font-weight: bold; padding: 4px;"
+                )
                 self.iface.messageBar().pushMessage(
-                    "SIDRA Connector", 
-                    "URL da API inserida com sucesso. Agora selecione uma camada e clique em 'Unir à Camada Alvo'.", 
-                    level=Qgis.Info, 
-                    duration=5
+                    "SIDRA Connector",
+                    "Consulta montada com sucesso!",
+                    level=Qgis.Info,
+                    duration=5,
                 )
 

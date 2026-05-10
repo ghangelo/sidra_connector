@@ -103,7 +103,7 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         search_layout.addLayout(search_input_layout)
         
         # Label de status
-        self.lbl_status = QtWidgets.QLabel("Digite pelo menos 2 caracteres para iniciar a busca...")
+        self.lbl_status = QtWidgets.QLabel("")
         self.lbl_status.setStyleSheet("color: gray; font-style: italic;")
         
         # Lista de resultados
@@ -204,7 +204,7 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         if not search_text:
             # Limpar resultados se o campo estiver vazio
             self.list_results.clear()
-            self.lbl_status.setText("Digite o nome ou ID da tabela para buscar...")
+            self.lbl_status.setText("")
             self.lbl_status.setStyleSheet("color: gray; font-style: italic;")
             return
 
@@ -215,7 +215,7 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         """Restaura o campo de busca e a lista ao estado inicial."""
         self.le_search.clear()
         self.list_results.clear()
-        self.lbl_status.setText("Digite o nome ou ID da tabela para buscar...")
+        self.lbl_status.setText("")
         self.lbl_status.setStyleSheet("color: gray; font-style: italic;")
 
     def perform_search(self):
@@ -481,14 +481,8 @@ class QueryBuilderDialog(QtWidgets.QDialog):
                 classificacoes_selecionadas
             )
             
-            # Habilitar botão OK
-            self.btn_ok.setEnabled(True)
-            
-            QtWidgets.QMessageBox.information(
-                self, 
-                "Sucesso", 
-                "URL da API gerada com sucesso! Clique em OK para usar a URL gerada."
-            )
+            # URL montada — fecha o dialogo automaticamente
+            self.accept()
             
         except Exception as e:
             QtWidgets.QMessageBox.critical(
@@ -530,28 +524,31 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         # Botões
         button_layout = QtWidgets.QHBoxLayout()
         btn_ok = QtWidgets.QPushButton("OK")
+        btn_ok.setEnabled(False)  # Desabilitado ate selecionar algo
         btn_cancel = QtWidgets.QPushButton("Cancelar")
-        
+
         button_layout.addStretch()
         button_layout.addWidget(btn_cancel)
         button_layout.addWidget(btn_ok)
-        
+
         layout.addLayout(button_layout)
-        
+
+        # Habilitar OK somente quando ha selecao
+        def _on_selection_changed():
+            btn_ok.setEnabled(len(list_widget.selectedItems()) > 0)
+
+        list_widget.itemSelectionChanged.connect(_on_selection_changed)
+
         # Conectar sinais
         btn_ok.clicked.connect(dialog.accept)
         btn_cancel.clicked.connect(dialog.reject)
-        
+
         # Executar diálogo
         if dialog.exec() == DIALOG_ACCEPTED:
             selected_items = list_widget.selectedItems()
-            
-            if not selected_items:
-                QtWidgets.QMessageBox.warning(self, "Aviso", "Nenhum item selecionado.")
-                return None
-                
-            return [item.data(USER_ROLE) for item in selected_items]
-        
+            if selected_items:
+                return [item.data(USER_ROLE) for item in selected_items]
+
         return None
 
     def get_generated_url(self):
