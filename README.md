@@ -78,6 +78,12 @@ Contribuições são bem-vindas! Se você encontrar um bug ou tiver uma sugestã
 
 *   **Gabriel Henrique Angelo** - [GaboV3](https://github.com/GaboV3)
 
+## Disclaimer — Uso de Inteligência Artificial
+
+Este projeto utilizou ferramentas de inteligência artificial (IA) como assistentes durante o processo de desenvolvimento. A IA foi empregada para auxiliar na escrita, revisão e refatoração de código, bem como na geração de estruturas e documentação.
+
+Todo o código gerado com auxílio de IA foi revisado, validado e adaptado pelo autor antes de ser incorporado ao projeto. A concepção, arquitetura, decisões de design e a lógica de negócio são de autoria e responsabilidade do desenvolvedor.
+
 ## Licença
 
 Este projeto está licenciado sob a Licença MIT. Veja o arquivo `LICENSE` para mais detalhes.
