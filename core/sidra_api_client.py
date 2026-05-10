@@ -10,7 +10,7 @@ Nao usa pandas -- tudo na mao com dicts e listas.
 """
 
 import requests
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 import re
 
 from ..utils import constants
