@@ -1,17 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Cliente HTTP para a API de dados do SIDRA/IBGE.
+Cliente da API de dados do SIDRA/IBGE.
 
-Este módulo converte a resposta da API (JSON ou XML) num dicionário
-de lookup ``{geo_code: {variavel: valor}}`` pronto para ser unido a
-camadas vetoriais pelo ``DataJoiner``.
+Pega a resposta da API (JSON ou XML), transforma num dicionario
+{codigo_geografico: {variavel: valor}} e entrega pro DataJoiner
+fazer o join com a camada vetorial.
 
-A implementação é **pure-Python** (sem pandas).  Duas funções auxiliares
-de nível de módulo (``_notna``, ``_parse_numeric``) substituem as
-utilidades equivalentes do pandas.
-
-Endpoint de dados:
-    ``https://apisidra.ibge.gov.br/values/t/{table}/...``
+Nao usa pandas -- tudo na mao com dicts e listas.
 """
 
 import requests
@@ -24,38 +19,23 @@ try:
     from qgis.core import QgsMessageLog, Qgis
     QGIS_AVAILABLE = True
 except ImportError:
-    # Permite importar fora do QGIS (testes, scripts standalone)
     QGIS_AVAILABLE = False
 
 
-# ---------------------------------------------------------------------------
-#  Funções auxiliares (substituem pandas)
-# ---------------------------------------------------------------------------
-
 def _notna(value):
-    """Retorna ``True`` se *value* não for ``None`` nem string vazia.
-
-    Equivalente simplificado de ``pandas.notna()``.
-    """
+    """Verifica se o valor nao eh None nem string vazia."""
     return value is not None and value != ''
 
 
 def _parse_numeric(value_str):
-    """Converte string numérica (possivelmente com vírgula) em ``float``.
+    """Tenta converter pra float, lidando com formato brasileiro (1.234,56).
 
-    Suporta o formato brasileiro: pontos como separador de milhar e
-    vírgula como separador decimal (ex: ``"1.234.567,89"``).
-
-    :param value_str: Valor bruto vindo da API.
-    :returns: ``float`` se conversível, ``str`` original caso contrário,
-        ou ``None`` se vazio.
+    Se nao conseguir, retorna a string original. Se for vazio, retorna None.
     """
     if value_str is None or value_str == '':
         return None
     try:
         normalized = str(value_str).strip()
-        # Formato brasileiro: pontos = milhar, vírgula = decimal
-        # Ex: "1.234.567,89" → "1234567.89"
         if ',' in normalized:
             normalized = normalized.replace('.', '').replace(',', '.')
         return float(normalized)
@@ -63,25 +43,13 @@ def _parse_numeric(value_str):
         return str(value_str) if _notna(value_str) else None
 
 
-# ---------------------------------------------------------------------------
-#  Cliente SIDRA
-# ---------------------------------------------------------------------------
-
 class SidraApiClient:
-    """Busca e transforma dados tabulares da API SIDRA.
+    """Busca dados tabulares da API SIDRA e transforma pra join.
 
-    Aceita tanto uma URL completa da API quanto um código numérico de
-    tabela.  O resultado é sempre um dicionário de lookup indexado por
-    código geográfico, adequado para junção espacial.
+    Aceita URL completa ou so o codigo da tabela.
     """
 
     def __init__(self, table_query):
-        """Inicializa o cliente.
-
-        :param table_query: Código da tabela (``int``) ou URL completa
-            da API SIDRA (``str`` começando por ``http``).
-        :raises ValueError: Se a URL não contiver ``/t/<código>``.
-        """
         self.full_query_url = None
         if isinstance(table_query, str) and table_query.startswith('http'):
             self.full_query_url = table_query
@@ -89,31 +57,21 @@ class SidraApiClient:
             if match:
                 self.table_code = int(match.group(1))
             else:
-                raise ValueError(f"Não foi possível extrair o código da tabela da URL: {table_query}")
+                raise ValueError(f"Nao achei o codigo da tabela na URL: {table_query}")
         else:
             self.table_code = int(table_query)
 
         self.base_url = f"https://apisidra.ibge.gov.br/values/t/{self.table_code}"
 
     def fetch_and_parse(self, params: dict = None) -> tuple:
-        """Faz a requisição HTTP, detecta o formato (JSON/XML) e transforma.
-
-        :param params: Parâmetros extras da consulta (ignorados quando o
-            cliente foi inicializado com uma URL completa).
-        :returns: Tupla ``(sidra_data_dict, header_info)``.
-        :raises TimeoutError: Timeout na requisição.
-        :raises ConnectionError: Erro de rede.
-        :raises requests.exceptions.HTTPError: Código HTTP ≥ 400.
-        """
+        """Faz a requisicao e retorna (dados, header_info)."""
 
         if self.full_query_url:
             final_url = self.full_query_url
         else:
             if params is None:
                 params = {}
-
             sanitized_params = {k: str(v).replace(" ", "") for k, v in params.items()}
-
             final_url = self.base_url
             if sanitized_params:
                 path_params = "/".join([f"{k}/{v}" for k, v in sanitized_params.items()])
@@ -123,51 +81,43 @@ class SidraApiClient:
             response = requests.get(final_url, timeout=constants.API_TIMEOUT)
             response.raise_for_status()
         except requests.exceptions.Timeout:
-            raise TimeoutError(f"Timeout na requisição à API SIDRA: {final_url}")
+            raise TimeoutError(f"Timeout ao chamar a API: {final_url}")
         except requests.exceptions.ConnectionError:
-            raise ConnectionError(f"Erro de conexão com a API SIDRA: {final_url}")
+            raise ConnectionError(f"Sem conexao com a API: {final_url}")
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response is not None else '?'
             raise requests.exceptions.HTTPError(
-                f"Erro HTTP na API SIDRA: {status} - {final_url}",
+                f"Erro HTTP {status}: {final_url}",
                 response=e.response,
             ) from e
         except requests.exceptions.RequestException as e:
-            raise requests.exceptions.RequestException(f"Erro na requisição à API SIDRA: {e}")
+            raise requests.exceptions.RequestException(f"Erro na requisicao: {e}")
 
-        # A API pode retornar XML (legado) ou JSON (padrão)
+        # A API pode devolver XML (raro) ou JSON (padrao)
         if response.headers.get('Content-Type', '').startswith('application/xml'):
             return self._parse_xml(response.text)
 
         data = response.json()
-        # A primeira posição do array é sempre o cabeçalho descritivo;
-        # se não houver dados reais, retorna vazio.
+        # Primeira posicao eh sempre o cabecalho, dados comecam na segunda
         if not data or len(data) <= 1:
             return {}, {}
 
-        header = data[0]   # Dict com nomes legíveis das colunas
-        rows = data[1:]     # Linhas de dados propriamente ditas
+        header = data[0]
+        rows = data[1:]
 
-        # Normaliza para lista de dicts uniformes
         columns = list(header.keys())
         table_data = [{col: row.get(col) for col in columns} for row in rows]
 
-        # Log do mapeamento coluna-código → coluna-nome para debug
         column_mapping = {k: v for k, v in header.items()}
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Mapeamento de colunas: {column_mapping}", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Colunas: {column_mapping}", "SIDRA Connector", Qgis.Info)
 
         sidra_data_dict, header_info = self._convert_rows_to_dict(table_data, columns, column_mapping)
         return sidra_data_dict, header_info
 
     def _parse_xml(self, xml_string: str) -> tuple:
-        """Analisa resposta XML (formato legado) da API SIDRA.
-
-        :param xml_string: Corpo XML completo da resposta.
-        :returns: Tupla ``(sidra_data_dict, header_info)``.
-        """
+        """Parseia resposta XML (formato antigo da API)."""
         root = ET.fromstring(xml_string)
-
         namespace = {'ns': 'http://schemas.datacontract.org/2004/07/IBGE.BTE.Tabela'}
 
         header_element = root.find('ns:ValorDescritoPorSuasDimensoes', namespace)
@@ -175,7 +125,6 @@ class SidraApiClient:
             return {}, {}
 
         header_map = {child.tag.split('}')[-1]: child.text for child in header_element}
-
         data_elements = root.findall('ns:ValorDescritoPorSuasDimensoes', namespace)[1:]
 
         all_rows = []
@@ -188,14 +137,14 @@ class SidraApiClient:
 
         columns = list(all_rows[0].keys())
 
-        # Identifica coluna de código geográfico
+        # Descobre qual coluna tem o codigo geografico
         geo_code_col = None
         niveis_geograficos = [
-            'brasil', 'grande região', 'unidade da federação',
-            'região metropolitana', 'região integrada de desenvolvimento',
-            'microrregião geográfica', 'mesorregião geográfica',
-            'região geográfica imediata', 'região geográfica intermediária',
-            'município', 'distrito', 'subdistrito', 'bairro', 'setor censitário'
+            'brasil', 'grande regiao', 'unidade da federacao',
+            'regiao metropolitana', 'regiao integrada de desenvolvimento',
+            'microrregiao geografica', 'mesorregiao geografica',
+            'regiao geografica imediata', 'regiao geografica intermediaria',
+            'municipio', 'distrito', 'subdistrito', 'bairro', 'setor censitario'
         ]
 
         for i in range(1, 10):
@@ -206,9 +155,8 @@ class SidraApiClient:
                 break
 
         if geo_code_col is None:
-            raise ValueError("Erro: Não foi possível identificar a coluna de código geográfico no cabeçalho do XML.")
+            raise ValueError("Nao achei a coluna de codigo geografico no XML.")
 
-        # Renomeia coluna geográfica para 'geo_code'
         if geo_code_col in columns:
             columns = ['geo_code' if c == geo_code_col else c for c in columns]
             for row in all_rows:
@@ -218,34 +166,26 @@ class SidraApiClient:
         return self._convert_rows_to_dict(all_rows, columns, {})
 
     def _convert_rows_to_dict(self, rows: list, columns: list, column_labels: dict = None) -> tuple:
-        """Transforma linhas tabulares num dict de lookup por código geográfico.
+        """Transforma as linhas da API no dicionario de lookup.
 
-        Estratégia de processamento:
-        - Se existir uma coluna de variável com múltiplos valores únicos
-          (ex.: ``D4N``) **e** uma coluna ``V``, agrupa por variável.
-        - Caso contrário (fallback), trata cada coluna de valor como
-          campo independente.
-
-        :param rows: Lista de dicts (uma entrada por linha da API).
-        :param columns: Nomes das colunas na ordem original.
-        :returns: Tupla ``(sidra_data_dict, header_info)``.
+        Se tem varias variaveis, agrupa por nome da variavel.
+        Se tem so uma, usa o nome dela (nao deixa ficar "V").
         """
         n_rows = len(rows)
         n_cols = len(columns)
 
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Iniciando conversão dos dados. Shape: ({n_rows}, {n_cols})", "SIDRA Connector", Qgis.Info)
-            QgsMessageLog.logMessage(f"Colunas disponíveis: {columns}", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Convertendo {n_rows} linhas x {n_cols} colunas", "SIDRA Connector", Qgis.Info)
 
         if not rows:
             if QGIS_AVAILABLE:
-                QgsMessageLog.logMessage("Dados vazios recebidos da API SIDRA", "SIDRA Connector", Qgis.Warning)
+                QgsMessageLog.logMessage("Nenhum dado recebido", "SIDRA Connector", Qgis.Warning)
             return {}, {}
 
         sidra_data_dict = {}
         header_info = {}
 
-        # Colunas de dimensão/metadados — não representam valores numéricos
+        # Colunas que sao metadados, nao valores numericos
         excluded_cols = {
             'geo_code',
             'D1C', 'D1N', 'D2C', 'D2N', 'D3C', 'D3N', 'D4C', 'D4N',
@@ -255,60 +195,50 @@ class SidraApiClient:
 
         col_set = set(columns)
 
-        # Identificar colunas que contêm valores numéricos de interesse
+        # Descobre quais colunas tem valores numericos
         value_cols = []
         if 'V' in col_set:
-            value_cols.append('V')  # Coluna padrão de valor da API
-
+            value_cols.append('V')
         for col in columns:
             if col not in excluded_cols and col not in value_cols:
                 value_cols.append(col)
 
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Colunas de valores identificadas: {value_cols}", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Colunas de valor: {value_cols}", "SIDRA Connector", Qgis.Info)
 
-        # Extrair metadados descritivos (colunas terminadas em 'N') da 1ª linha
+        # Pega info descritiva da primeira linha (nomes das dimensoes)
         first_row = rows[0]
         for col in columns:
             if col.endswith('N'):
                 val = first_row.get(col)
                 header_info[col] = val if _notna(val) else col
 
-        # --- Identificar coluna de código geográfico ---
-        # A API retorna o geo code em D1C (mais comum), D2C etc.
+        # Acha a coluna de codigo geografico
         geo_code_col = None
         if 'geo_code' not in col_set:
             if QGIS_AVAILABLE:
-                QgsMessageLog.logMessage("Coluna 'geo_code' não encontrada. Tentando identificar coluna geográfica...", "SIDRA Connector", Qgis.Warning)
+                QgsMessageLog.logMessage("'geo_code' nao encontrado, procurando alternativa...", "SIDRA Connector", Qgis.Warning)
 
             if 'D1C' in col_set:
                 geo_code_col = 'D1C'
-                if QGIS_AVAILABLE:
-                    QgsMessageLog.logMessage("Usando coluna 'D1C' como código geográfico", "SIDRA Connector", Qgis.Info)
             else:
                 geo_candidates = [col for col in columns if col.endswith('C') and any(dim in col for dim in ['D1', 'D2', 'D3', 'D4'])]
                 if geo_candidates:
                     geo_code_col = geo_candidates[0]
-                    if QGIS_AVAILABLE:
-                        QgsMessageLog.logMessage(f"Usando coluna '{geo_code_col}' como código geográfico", "SIDRA Connector", Qgis.Info)
                 else:
                     if QGIS_AVAILABLE:
-                        QgsMessageLog.logMessage("Nenhuma coluna geográfica identificada", "SIDRA Connector", Qgis.Critical)
+                        QgsMessageLog.logMessage("Nenhuma coluna geografica encontrada!", "SIDRA Connector", Qgis.Critical)
                     return {}, header_info
 
-            # Renomeia a coluna geográfica em todas as linhas
+            # Renomeia pra 'geo_code' em todas as linhas
             for row in rows:
                 if geo_code_col in row:
                     row['geo_code'] = row.pop(geo_code_col)
-        else:
-            pass  # 'geo_code' já existe nas linhas; nada a renomear
 
         rows_processed = 0
 
-        # --- Detectar coluna de variável para agrupamento ---
-        # A coluna de variável é aquela (D2N..D7N) que apresenta mais de
-        # um valor único, indicando que os dados estão "empilhados" por
-        # variável. Prioridade: D4N > D3N > D2N > D5N > D6N > D7N.
+        # Procura coluna de variavel (a que tem mais de 1 valor unico)
+        # Ordem de prioridade: D4N > D3N > D2N > D5N > D6N > D7N
         variable_column = None
         variable_candidates = ['D4N', 'D3N', 'D2N', 'D5N', 'D6N', 'D7N']
 
@@ -322,10 +252,9 @@ class SidraApiClient:
         has_value_column = 'V' in col_set
 
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Coluna de variável identificada: {variable_column}", "SIDRA Connector", Qgis.Info)
-            QgsMessageLog.logMessage(f"Tem coluna de valor (V): {has_value_column}", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Coluna de variavel: {variable_column}", "SIDRA Connector", Qgis.Info)
 
-        # ===== Caminho 1: dados empilhados por variável =====
+        # Caminho 1: varias variaveis empilhadas na coluna V
         if variable_column and has_value_column:
             for row in rows:
                 gc = row.get('geo_code')
@@ -340,6 +269,7 @@ class SidraApiClient:
 
                     processed_value = _parse_numeric(value)
 
+                    # Se ja existe essa variavel pro mesmo geo_code, adiciona sufixo
                     var_key = variable_name
                     counter = 1
                     while var_key in sidra_data_dict[geo_code]:
@@ -349,20 +279,16 @@ class SidraApiClient:
                     sidra_data_dict[geo_code][var_key] = processed_value
                     rows_processed += 1
         else:
-            # Quando há apenas 1 variável selecionada, a coluna de
-            # dimensão (D4N, D3N, etc.) existe mas com um único valor,
-            # então variable_column ficou None.  Renomeia "V" para o
-            # nome real da variável em vez de gerar uma coluna chamada "V".
-            #
-            # Usa o header da API (column_labels) para encontrar a coluna
-            # rotulada "Variável" — evita confundir com "Ano"/"Trimestre".
+            # Caminho 2: so 1 variavel (ou nenhuma coluna de agrupamento)
+            # Nesse caso, tenta descobrir o nome da variavel pelo header
+            # pra nao ficar uma coluna generica chamada "V"
             single_var_name = None
             if has_value_column and not variable_column and column_labels:
-                # Procura a coluna cujo rótulo no header contém "ariável"
+                # Procura no header qual coluna eh rotulada "Variavel"
                 var_col = None
                 for candidate in variable_candidates:
                     label = str(column_labels.get(candidate, '')).lower()
-                    if 'ariável' in label or 'ariavel' in label:
+                    if 'ariavel' in label or 'ariável' in label:
                         var_col = candidate
                         break
 
@@ -375,11 +301,9 @@ class SidraApiClient:
 
             if single_var_name and QGIS_AVAILABLE:
                 QgsMessageLog.logMessage(
-                    f"Variável única detectada: '{single_var_name}' — renomeando coluna 'V'",
+                    f"Variavel unica: '{single_var_name}'",
                     "SIDRA Connector", Qgis.Info,
                 )
-            elif QGIS_AVAILABLE:
-                QgsMessageLog.logMessage("Usando lógica de fallback - sem agrupamento por variável", "SIDRA Connector", Qgis.Info)
 
             for row in rows:
                 gc = row.get('geo_code')
@@ -390,13 +314,11 @@ class SidraApiClient:
                     for col in value_cols:
                         val = row.get(col)
                         if _notna(val):
-                            # Usa o nome da variável em vez de "V"
+                            # Usa o nome real da variavel em vez de "V"
                             key = single_var_name if (col == 'V' and single_var_name) else col
                             row_data[key] = _parse_numeric(val)
 
                     if row_data:
-                        # Mescla com dados anteriores do mesmo geo_code em
-                        # vez de sobrescrever (múltiplas linhas por localidade).
                         if geo_code in sidra_data_dict:
                             sidra_data_dict[geo_code].update(row_data)
                         else:
@@ -404,11 +326,11 @@ class SidraApiClient:
                         rows_processed += 1
 
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Conversão concluída: {len(sidra_data_dict)} registros geográficos, {rows_processed} linhas processadas", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Pronto: {len(sidra_data_dict)} localidades, {rows_processed} linhas", "SIDRA Connector", Qgis.Info)
             if len(sidra_data_dict) > 0:
                 sample_key = next(iter(sidra_data_dict.keys()))
                 sample_data = sidra_data_dict[sample_key]
                 variables = list(sample_data.keys())
-                QgsMessageLog.logMessage(f"Exemplo de dados: geo_code={sample_key}, variáveis={variables}", "SIDRA Connector", Qgis.Info)
+                QgsMessageLog.logMessage(f"Exemplo: {sample_key} -> {variables}", "SIDRA Connector", Qgis.Info)
 
         return sidra_data_dict, header_info

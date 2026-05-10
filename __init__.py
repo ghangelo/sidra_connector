@@ -3,29 +3,23 @@
 /***************************************************************************
  SIDRA Connector
                                  A QGIS plugin
- Plugin para buscar dados tabulares da API SIDRA/IBGE, baixar malhas
- territoriais e uni-los a camadas vetoriais dentro do QGIS.
+ Busca dados do SIDRA/IBGE, baixa malhas territoriais e faz join
+ com camadas vetoriais direto no QGIS.
 
- Compatível com Qt5 (QGIS ≤ 3.38) e Qt6 (QGIS 3.40+ / 4.x).
+ Funciona com Qt5 (QGIS 3.x) e Qt6 (QGIS 4.x).
                              -------------------
         begin                : 2025-07-29
         copyright            : (C) 2025 by Gabriel Henrique Angelo
         email                : angelo.henrique.gabriel@gmail.com
  ***************************************************************************/
 
- Este módulo é o ponto de entrada exigido pelo QGIS para reconhecer o plugin.
- A função ``classFactory()`` é chamada automaticamente pelo carregador de
- plugins e deve retornar uma instância da classe principal.
+ Ponto de entrada do plugin. O QGIS chama classFactory() automaticamente
+ quando carrega o plugin.
 """
 
 
 # noinspection PyPep8Naming
 def classFactory(iface):  # pylint: disable=invalid-name
-    """Ponto de entrada do plugin — chamado pelo QGIS ao carregar.
-
-    :param iface: Instância da interface do QGIS (``QgsInterface``).
-    :type iface: QgsInterface
-    :returns: Instância de ``SidraConnector``.
-    """
+    """O QGIS chama essa funcao pra instanciar o plugin."""
     from .plugin import SidraConnector
     return SidraConnector(iface)

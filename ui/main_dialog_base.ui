@@ -17,7 +17,7 @@
    <item>
     <widget class="QGroupBox" name="groupBox_3">
      <property name="title">
-      <string>1. Baixar Malha Territorial do IBGE (Opcional)</string>
+      <string>1. Baixar Malha do IBGE (opcional)</string>
      </property>
      <layout class="QGridLayout" name="gridLayout_3">
       <item row="0" column="0">
@@ -70,10 +70,9 @@
    <item>
     <widget class="QGroupBox" name="groupBox">
      <property name="title">
-      <string>2. Montar Consulta</string>
+      <string>2. Escolher Tabela do SIDRA</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_2">
-      <!-- URL e campo ocultos — preenchidos programaticamente pelo QueryBuilder -->
       <item>
        <widget class="QLabel" name="label">
         <property name="text">
@@ -89,12 +88,6 @@
       </item>
       <item>
        <widget class="QLineEdit" name="le_api_url">
-        <property name="toolTip">
-         <string>Cole aqui a URL completa da API, obtida no site do SIDRA</string>
-        </property>
-        <property name="placeholderText">
-         <string>Ex: http://api.sidra.ibge.gov.br/values/t/5938/...</string>
-        </property>
         <property name="visible">
          <bool>false</bool>
         </property>
@@ -106,13 +99,13 @@
    <item>
     <widget class="QGroupBox" name="groupBox_2">
      <property name="title">
-      <string>3. Configuração da União (Join)</string>
+      <string>3. Unir Dados à Camada</string>
      </property>
      <layout class="QGridLayout" name="gridLayout">
       <item row="0" column="0">
        <widget class="QLabel" name="label_5">
         <property name="text">
-         <string>Camada Vetorial Alvo:</string>
+         <string>Camada:</string>
         </property>
        </widget>
       </item>
@@ -122,7 +115,7 @@
       <item row="1" column="0">
        <widget class="QLabel" name="label_6">
         <property name="text">
-         <string>Campo de União (da Camada Alvo):</string>
+         <string>Campo de união:</string>
         </property>
        </widget>
       </item>
@@ -154,7 +147,7 @@
       </size>
      </property>
      <property name="text">
-      <string>Unir à Camada Alvo</string>
+      <string>Unir à Camada</string>
      </property>
     </widget>
    </item>

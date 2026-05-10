@@ -1,23 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-Utilitários para manipulação de camadas vetoriais no QGIS.
+Funcoes pra mexer com camadas vetoriais no QGIS.
 
-Funções usadas pelo diálogo principal e pelo gerenciador de tarefas:
-- Listar camadas do projeto.
-- Obter nomes de campos.
-- Adicionar camadas ao projeto.
-- Converter camadas de arquivo para camadas temporárias em memória,
-  permitindo que os arquivos temporários sejam apagados com segurança.
+Coisas tipo: listar camadas do projeto, pegar os campos,
+adicionar camada, e converter camada de arquivo pra memoria.
 """
 
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
 
 
 def get_project_vector_layers():
-    """Retorna todas as camadas vetoriais **com geometria** do projeto aberto.
+    """Pega todas as camadas vetoriais do projeto que tem geometria.
 
-    Exclui camadas sem geometria (ex.: tabelas CSV) para popular a
-    combobox de camadas-alvo no diálogo principal.
+    Ignora tabelas CSV e outras camadas sem geometria.
     """
     layers = QgsProject.instance().mapLayers().values()
     return [
@@ -27,22 +22,14 @@ def get_project_vector_layers():
 
 
 def get_layer_fields(layer):
-    """Retorna os nomes dos campos (atributos) de uma camada vetorial.
-
-    :param layer: Camada vetorial do QGIS.
-    :returns: Lista de strings com os nomes dos campos, ou lista vazia.
-    """
+    """Retorna a lista de nomes dos campos de uma camada."""
     if not layer or not isinstance(layer, QgsVectorLayer):
         return []
     return [field.name() for field in layer.fields()]
 
 
 def add_layer_to_project(layer):
-    """Adiciona uma camada válida ao projeto QGIS atual.
-
-    :param layer: ``QgsVectorLayer`` a ser adicionada.
-    :returns: ``True`` se adicionada com sucesso, ``False`` caso contrário.
-    """
+    """Adiciona uma camada ao projeto se ela for valida."""
     if layer and layer.isValid():
         QgsProject.instance().addMapLayer(layer)
         return True
@@ -50,50 +37,34 @@ def add_layer_to_project(layer):
 
 
 def load_vector_layer(path, name):
-    """Cria uma ``QgsVectorLayer`` a partir de um arquivo em disco (via OGR).
+    """Abre um shapefile (ou outro formato OGR) como camada vetorial.
 
-    Nota: a camada retornada ainda aponta para o arquivo em disco;
-    use ``file_layer_to_memory()`` se precisar desvincular do arquivo.
-
-    :param path: Caminho completo para o shapefile (ou outro formato OGR).
-    :param name: Nome de exibição da camada.
-    :returns: ``QgsVectorLayer`` (pode estar inválida — verifique ``.isValid()``).
+    A camada fica vinculada ao arquivo em disco. Se quiser desvincular,
+    usa file_layer_to_memory() depois.
     """
     layer = QgsVectorLayer(path, name, "ogr")
     return layer
 
 
 def file_layer_to_memory(file_layer, name):
-    """Converte uma camada de arquivo (OGR) para camada temporária em memória.
+    """Copia uma camada de arquivo pra memoria.
 
-    Isso permite remover os arquivos temporários do disco logo após a
-    conversão, sem invalidar a camada no projeto.
-
-    O processo copia:
-    1. Estrutura de campos (schema).
-    2. Todas as feições (geometria + atributos).
-
-    :param file_layer: ``QgsVectorLayer`` de origem (provider ``ogr``).
-    :param name: Nome a atribuir à camada temporária.
-    :returns: ``QgsVectorLayer`` em memória, ou ``None`` se a conversão falhar.
+    Isso permite apagar os arquivos temporarios do disco
+    sem perder a camada no QGIS.
     """
     if not file_layer or not file_layer.isValid():
         return None
 
-    # Monta a URI de memória apenas com o tipo de geometria;
-    # o CRS é aplicado explicitamente via setCrs() para cobrir CRS
-    # sem authid (ex.: projeções customizadas).
     geom_type = QgsWkbTypes.displayString(file_layer.wkbType())
     mem_layer = QgsVectorLayer(f"{geom_type}", name, "memory")
     mem_layer.setCrs(file_layer.crs())
     mem_provider = mem_layer.dataProvider()
 
-    # Copia a estrutura de campos (schema)
+    # Copia campos
     mem_provider.addAttributes(file_layer.fields().toList())
     mem_layer.updateFields()
 
-    # Copia todas as feições (geometria + atributos)
-    # Passa o iterador diretamente para evitar carregar todas as feições na RAM.
+    # Copia feicoes (geometria + atributos)
     mem_provider.addFeatures(file_layer.getFeatures())
     mem_layer.updateExtents()
 

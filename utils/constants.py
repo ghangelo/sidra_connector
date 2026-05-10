@@ -1,16 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Constantes globais do plugin SIDRA Connector.
+Constantes usadas pelo plugin todo.
 
-Centraliza mapeamentos geográficos, URLs do IBGE e parâmetros de rede
-utilizados pelos módulos ``mesh_downloader``, ``task_manager`` e
-``main_dialog``.
+Tem os mapeamentos de UF, tipos de malha, URLs do IBGE
+e configuracoes de timeout.
 """
 
-# ---------------------------------------------------------------------------
-#  Mapeamento de UFs (nome completo → sigla IBGE)
-#  Inclui "Brasil" para download de malhas em niveis nacionais.
-# ---------------------------------------------------------------------------
+# UFs do Brasil (nome -> sigla)
+# "Brasil" ta aqui pra quando quiser baixar malha nacional
 UFS = {
     "Brasil": "BR", "Acre": "AC", "Alagoas": "AL", "Amapá": "AP",
     "Amazonas": "AM", "Bahia": "BA", "Ceará": "CE", "Distrito Federal": "DF",
@@ -22,9 +19,7 @@ UFS = {
     "Sergipe": "SE", "Tocantins": "TO",
 }
 
-# ---------------------------------------------------------------------------
-#  Tipos de malha disponíveis (rótulo da UI → prefixo do arquivo no GeoFTP)
-# ---------------------------------------------------------------------------
+# Tipos de malha (o que aparece na tela -> nome do arquivo no servidor)
 MALHAS = {
     "Municípios": "Municipios",
     "Unidades da Federação": "UF",
@@ -34,20 +29,16 @@ MALHAS = {
     "País": "Pais",
 }
 
-# ---------------------------------------------------------------------------
-#  URLs do GeoFTP / IBGE para malhas territoriais
-# ---------------------------------------------------------------------------
+# URLs do GeoFTP do IBGE
 IBGE_MESH_BASE_URL_PARENT = (
     "https://geoftp.ibge.gov.br/organizacao_do_territorio/"
     "malhas_territoriais/malhas_municipais/"
 )
 
-# {ano} é substituído em tempo de execução por main_dialog.py
+# {ano} eh substituido na hora de montar a URL
 IBGE_MESH_BASE_URL = IBGE_MESH_BASE_URL_PARENT + "municipio_{ano}/"
 
-# ---------------------------------------------------------------------------
-#  Parâmetros de rede e performance
-# ---------------------------------------------------------------------------
-API_TIMEOUT = 30        # Timeout (s) para requisições de metadados / API SIDRA
-DOWNLOAD_TIMEOUT = 300  # Timeout (s) para download de malhas (.zip)
-CHUNK_SIZE = 65536      # Tamanho do bloco (bytes) para streaming de download
+# Timeouts
+API_TIMEOUT = 30        # Segundos pra chamadas de API
+DOWNLOAD_TIMEOUT = 300  # Segundos pra downloads de malha
+CHUNK_SIZE = 65536      # Bytes por pedaco no download
