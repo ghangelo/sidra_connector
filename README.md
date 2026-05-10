@@ -1,5 +1,11 @@
 # SIDRA Connector
 
+## Disclaimer — Uso de Inteligência Artificial
+
+Este projeto utilizou ferramentas de inteligência artificial (IA) como assistentes durante o processo de desenvolvimento. A IA foi empregada para auxiliar na escrita, revisão e refatoração de código, bem como na geração de estruturas e documentação.
+
+Todo o código gerado com auxílio de IA foi revisado, validado e adaptado pelo autor antes de ser incorporado ao projeto. A concepção, arquitetura, decisões de design e a lógica de negócio são de autoria e responsabilidade do desenvolvedor.
+
 ## Descrição
 
 O **SIDRA Connector** é um plugin para o QGIS projetado para facilitar a integração de dados estatísticos do Sistema IBGE de Recuperação Automática (SIDRA) com as malhas territoriais digitais do IBGE. Ele permite que usuários, como analistas de dados, pesquisadores e planejadores urbanos, busquem, baixem e vinculem dados de tabelas do SIDRA diretamente a camadas vetoriais no QGIS.
@@ -77,12 +83,6 @@ Contribuições são bem-vindas! Se você encontrar um bug ou tiver uma sugestã
 ## Autor
 
 *   **Gabriel Henrique Angelo** - [GaboV3](https://github.com/GaboV3)
-
-## Disclaimer — Uso de Inteligência Artificial
-
-Este projeto utilizou ferramentas de inteligência artificial (IA) como assistentes durante o processo de desenvolvimento. A IA foi empregada para auxiliar na escrita, revisão e refatoração de código, bem como na geração de estruturas e documentação.
-
-Todo o código gerado com auxílio de IA foi revisado, validado e adaptado pelo autor antes de ser incorporado ao projeto. A concepção, arquitetura, decisões de design e a lógica de negócio são de autoria e responsabilidade do desenvolvedor.
 
 ## Licença
 
