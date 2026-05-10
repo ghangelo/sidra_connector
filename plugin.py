@@ -10,7 +10,7 @@ import os
 from qgis.PyQt.QtWidgets import QAction
 from qgis.PyQt.QtGui import QIcon
 from .ui.main_dialog import SidraConnectorDialog
-from .gis.task_manager import active_tasks, cancel_all_tasks
+from .gis.task_manager import cancel_all_tasks
 
 
 class SidraConnector:

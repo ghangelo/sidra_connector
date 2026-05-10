@@ -15,7 +15,6 @@ import os
 import sqlite3
 from qgis.PyQt import QtWidgets, QtCore
 from qgis.PyQt.QtCore import QThread, pyqtSignal
-from qgis.core import QgsMessageLog, Qgis
 
 from ..core.api_helpers import get_metadata_from_api, montar_url_interativa
 
@@ -257,13 +256,13 @@ class QueryBuilderDialog(QtWidgets.QDialog):
                     params.extend([f"%{tok}%", f"%{tok}%"])
 
                 where_clause = ' AND '.join(where_parts)
-                query = f"""
-                    SELECT a.id, a.nome, g.nome as grupo_nome
-                    FROM agregados a
-                    JOIN grupos g ON a.grupo_id = g.id
-                    WHERE {where_clause}
-                    ORDER BY a.nome
-                """
+                base_query = (
+                    "SELECT a.id, a.nome, g.nome as grupo_nome"
+                    " FROM agregados a"
+                    " JOIN grupos g ON a.grupo_id = g.id"
+                    " WHERE "
+                )
+                query = base_query + where_clause + " ORDER BY a.nome"
                 cursor.execute(query, params)
 
             results = cursor.fetchall()

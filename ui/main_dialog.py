@@ -14,12 +14,12 @@ from qgis.PyQt import QtWidgets, uic
 
 from .query_builder_dialog import QueryBuilderDialog
 from ..core.mesh_downloader import fetch_available_years
-
-FORM_CLASS, _ = uic.loadUiType(os.path.join(
-    os.path.dirname(__file__), 'main_dialog_base.ui'))
 from ..gis import layer_manager, task_manager
 from ..core.data_joiner import DataJoiner
 from ..utils import constants
+
+FORM_CLASS, _ = uic.loadUiType(os.path.join(
+    os.path.dirname(__file__), 'main_dialog_base.ui'))
 
 # Qt5 vs Qt6
 try:

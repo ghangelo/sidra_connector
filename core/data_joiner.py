@@ -14,9 +14,19 @@ from qgis.core import (
     QgsFeature,
     QgsFields,
     QgsWkbTypes,
-    Qgis,
 )
-from qgis.PyQt.QtCore import QVariant
+
+# QGIS 3.38+ usa QMetaType, versoes anteriores usam QVariant
+try:
+    from PyQt5.QtCore import QMetaType
+    DOUBLE_TYPE = QMetaType.Double
+except (ImportError, AttributeError):
+    try:
+        from qgis.PyQt.QtCore import QMetaType
+        DOUBLE_TYPE = QMetaType.Type.Double
+    except (ImportError, AttributeError):
+        from qgis.PyQt.QtCore import QVariant
+        DOUBLE_TYPE = QVariant.Double
 
 
 class DataJoiner:
@@ -66,7 +76,7 @@ class DataJoiner:
         all_class_values = sorted(
             list(set(k for item in self.sidra_data.values() for k in item.keys()))
         )
-        period = self.header_info.get('D3N', 'periodo')
+
 
         # Cria nomes de campo seguros pro QGIS (sem espaco, sem acento esquisito)
         field_map = {}
@@ -97,7 +107,7 @@ class DataJoiner:
             used_field_names.add(field_name)
 
             if new_fields.indexFromName(field_name) == -1:
-                new_fields.append(QgsField(field_name, QVariant.Double))
+                new_fields.append(QgsField(field_name, DOUBLE_TYPE))
             field_map[class_value] = field_name
 
         # Cria a camada de resultado em memoria
