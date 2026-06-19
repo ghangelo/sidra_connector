@@ -88,7 +88,4 @@ def montar_url_interativa(
         ids_categorias = ",".join(map(str, cat_ids))
         url_parts.append(f"/c{class_id}/{ids_categorias}")
 
-    # /f/u -- pede pra API incluir os nomes das unidades
-    url_parts.append("/f/u")
-
     return base_url + "".join(url_parts)
