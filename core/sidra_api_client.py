@@ -10,15 +10,15 @@ Nao usa pandas -- tudo na mao com dicts e listas.
 """
 
 import requests
-import xml.etree.ElementTree as ET
 import re
 
-# Se defusedxml tiver instalado, protege contra ataques XML.
-# Se nao tiver, segue normal -- o XML so vem da API do IBGE mesmo.
+# Usa defusedxml para proteger contra ataques XML (XXE, billion laughs, etc.).
+# Faz fallback pro stdlib apenas se defusedxml nao estiver instalado --
+# nesse caso o parsing de XML fica vulneravel; instale defusedxml para corrigir.
 try:
-    import defusedxml.ElementTree as ET  # noqa: F811
-except ImportError:
-    pass
+    import defusedxml.ElementTree as ET
+except ImportError:  # pragma: no cover
+    import xml.etree.ElementTree as ET  # noqa: S405
 
 from ..utils import constants
 
