@@ -32,30 +32,30 @@ def get_metadata_from_api(tabela_id):
     if QGIS_AVAILABLE:
         QgsMessageLog.logMessage(
             f"Buscando metadados da tabela {tabela_id}...",
-            "SIDRA Connector", Qgis.Info,
+            "SIDRA Connector", Qgis.MessageLevel.Info,
         )
 
     try:
         response = requests.get(url, timeout=constants.API_TIMEOUT)
         response.raise_for_status()
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage("Metadados recebidos.", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage("Metadados recebidos.", "SIDRA Connector", Qgis.MessageLevel.Info)
         return response.json()
 
     except requests.exceptions.HTTPError as errh:
         error_msg = f"Erro HTTP: {errh}. Confere se a tabela '{tabela_id}' existe."
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(error_msg, "SIDRA Connector", Qgis.Critical)
+            QgsMessageLog.logMessage(error_msg, "SIDRA Connector", Qgis.MessageLevel.Critical)
 
     except requests.exceptions.RequestException as err:
         error_msg = f"Erro de conexao: {err}"
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(error_msg, "SIDRA Connector", Qgis.Critical)
+            QgsMessageLog.logMessage(error_msg, "SIDRA Connector", Qgis.MessageLevel.Critical)
 
     except json.JSONDecodeError:
         error_msg = "A resposta da API nao eh JSON valido."
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(error_msg, "SIDRA Connector", Qgis.Critical)
+            QgsMessageLog.logMessage(error_msg, "SIDRA Connector", Qgis.MessageLevel.Critical)
 
     return None
 

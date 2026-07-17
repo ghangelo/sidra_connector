@@ -70,7 +70,7 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         except (ConnectionError, ValueError) as e:
             QgsMessageLog.logMessage(
                 f"Nao conseguiu pegar anos do IBGE, usando lista fixa: {e}",
-                "SIDRA Connector", Qgis.Warning,
+                "SIDRA Connector", Qgis.MessageLevel.Warning,
             )
             current_year = datetime.datetime.now().year
             anos = [str(y) for y in range(current_year, 1999, -1)]
@@ -134,7 +134,7 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         url = base_url + url_path
         layer_name = f"{malha_prefixo}_{localidade_nome}_{ano}".replace(" ", "_")
 
-        self.iface.messageBar().pushMessage("SIDRA", f"Baixando a malha {layer_name}...", level=Qgis.Info, duration=5)
+        self.iface.messageBar().pushMessage("SIDRA", f"Baixando a malha {layer_name}...", level=Qgis.MessageLevel.Info, duration=5)
         task_manager.run_download_task(url, layer_name, self.on_download_success, self.on_download_error)
 
     def on_download_success(self, new_layer):
@@ -142,7 +142,7 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         self.iface.messageBar().pushMessage(
             "Pronto!",
             f"A camada '{new_layer.name()}' já está no projeto.",
-            level=Qgis.Success,
+            level=Qgis.MessageLevel.Success,
         )
         self.populate_layers_combobox()
         index = self.cb_target_layer.findData(new_layer)
@@ -152,7 +152,7 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_download_error(self, error_message):
         """Deu ruim no download."""
         self.iface.messageBar().pushMessage(
-            "Ops!", error_message, level=Qgis.Critical, duration=10
+            "Ops!", error_message, level=Qgis.MessageLevel.Critical, duration=10
         )
 
     def handle_fetch_and_join(self):
@@ -162,22 +162,22 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
         join_field = self.cb_target_field.currentText()
 
         if not api_url:
-            self.iface.messageBar().pushMessage("Atenção", "Primeiro monte a consulta clicando em 'Buscar Tabela'.", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Atenção", "Primeiro monte a consulta clicando em 'Buscar Tabela'.", level=Qgis.MessageLevel.Critical)
             return
 
         if not api_url.startswith(('http://', 'https://')):
-            self.iface.messageBar().pushMessage("Atenção", "A URL da consulta parece inválida.", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Atenção", "A URL da consulta parece inválida.", level=Qgis.MessageLevel.Critical)
             return
 
         if not target_layer:
-            self.iface.messageBar().pushMessage("Atenção", "Escolha uma camada na etapa 3.", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Atenção", "Escolha uma camada na etapa 3.", level=Qgis.MessageLevel.Critical)
             return
 
         if not join_field:
-            self.iface.messageBar().pushMessage("Atenção", "Escolha o campo que será usado pra unir os dados.", level=Qgis.Critical)
+            self.iface.messageBar().pushMessage("Atenção", "Escolha o campo que será usado pra unir os dados.", level=Qgis.MessageLevel.Critical)
             return
 
-        self.iface.messageBar().pushMessage("SIDRA", "Buscando os dados...", level=Qgis.Info, duration=5)
+        self.iface.messageBar().pushMessage("SIDRA", "Buscando os dados...", level=Qgis.MessageLevel.Info, duration=5)
 
         # Desabilita pra evitar clique duplo
         self.btn_fetch_join.setEnabled(False)
@@ -191,13 +191,13 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
     def on_fetch_success(self, sidra_data, header_info):
         """Dados chegaram da API -- hora de fazer o join."""
         self.btn_fetch_join.setEnabled(True)
-        self.iface.messageBar().pushMessage("SIDRA", "Dados recebidos! Fazendo a união...", level=Qgis.Info)
+        self.iface.messageBar().pushMessage("SIDRA", "Dados recebidos! Fazendo a união...", level=Qgis.MessageLevel.Info)
 
         if not sidra_data or not isinstance(sidra_data, dict):
             self.iface.messageBar().pushMessage(
                 "Ops!",
                 "A API não devolveu dados válidos. Tenta montar a consulta de novo.",
-                level=Qgis.Critical,
+                level=Qgis.MessageLevel.Critical,
                 duration=10
             )
             return
@@ -206,7 +206,7 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
             self.iface.messageBar().pushMessage(
                 "Hmm",
                 "A API retornou vazio. Confere se os parâmetros da consulta estão certos.",
-                level=Qgis.Warning,
+                level=Qgis.MessageLevel.Warning,
                 duration=10
             )
             return
@@ -222,7 +222,7 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
             layer_manager.add_layer_to_project(new_layer)
 
             if join_count > 0:
-                self.iface.messageBar().pushMessage("Pronto!", f"Nova camada criada com {join_count} feições unidas!", Qgis.Success)
+                self.iface.messageBar().pushMessage("Pronto!", f"Nova camada criada com {join_count} feições unidas!", Qgis.MessageLevel.Success)
             else:
                 sidra_keys_sample = list(sidra_data.keys())[:5] if sidra_data else []
                 self.iface.messageBar().pushMessage(
@@ -230,22 +230,22 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
                     f"Os códigos não bateram. "
                     f"Na camada: {layer_keys}. "
                     f"No SIDRA: {sidra_keys_sample}.",
-                    level=Qgis.Warning,
+                    level=Qgis.MessageLevel.Warning,
                     duration=20
                 )
         except ValueError as e:
-            self.iface.messageBar().pushMessage("Ops!", f"Problema nos dados: {e}", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Ops!", f"Problema nos dados: {e}", Qgis.MessageLevel.Critical)
         except TypeError as e:
-            self.iface.messageBar().pushMessage("Ops!", f"Erro no processamento: {e}", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Ops!", f"Erro no processamento: {e}", Qgis.MessageLevel.Critical)
         except Exception as e:
-            self.iface.messageBar().pushMessage("Ops!", f"Algo deu errado: {e}", Qgis.Critical)
+            self.iface.messageBar().pushMessage("Ops!", f"Algo deu errado: {e}", Qgis.MessageLevel.Critical)
 
     def on_fetch_error(self, error_message):
         """Deu erro na chamada da API."""
         self.btn_fetch_join.setEnabled(True)
         self.iface.messageBar().pushMessage(
             "Ops!", f"Não consegui buscar os dados: {error_message}",
-            level=Qgis.Critical, duration=10,
+            level=Qgis.MessageLevel.Critical, duration=10,
         )
 
     def open_query_builder(self):
@@ -265,6 +265,6 @@ class SidraConnectorDialog(QtWidgets.QDialog, FORM_CLASS):
                 self.iface.messageBar().pushMessage(
                     "SIDRA",
                     "Tudo certo! Consulta montada.",
-                    level=Qgis.Info,
+                    level=Qgis.MessageLevel.Info,
                     duration=5,
                 )

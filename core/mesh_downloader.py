@@ -110,5 +110,5 @@ class MeshDownloader:
         except Exception as e:
             QgsMessageLog.logMessage(
                 f"Erro ao limpar temporarios: {e}",
-                "SIDRA Connector", Qgis.Warning,
+                "SIDRA Connector", Qgis.MessageLevel.Warning,
             )
