@@ -18,15 +18,11 @@ from qgis.core import (
 
 # QGIS 3.38+ usa QMetaType, versoes anteriores usam QVariant
 try:
-    from PyQt5.QtCore import QMetaType
-    DOUBLE_TYPE = QMetaType.Double
+    from qgis.PyQt.QtCore import QMetaType
+    DOUBLE_TYPE = QMetaType.Type.Double
 except (ImportError, AttributeError):
-    try:
-        from qgis.PyQt.QtCore import QMetaType
-        DOUBLE_TYPE = QMetaType.Type.Double
-    except (ImportError, AttributeError):
-        from qgis.PyQt.QtCore import QVariant
-        DOUBLE_TYPE = QVariant.Double
+    from qgis.PyQt.QtCore import QVariant
+    DOUBLE_TYPE = QVariant.Double
 
 
 class DataJoiner:

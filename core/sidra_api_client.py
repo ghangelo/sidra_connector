@@ -117,7 +117,7 @@ class SidraApiClient:
 
         column_mapping = {k: v for k, v in header.items()}
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Colunas: {column_mapping}", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Colunas: {column_mapping}", "SIDRA Connector", Qgis.MessageLevel.Info)
 
         sidra_data_dict, header_info = self._convert_rows_to_dict(table_data, columns, column_mapping)
         return sidra_data_dict, header_info
@@ -182,11 +182,11 @@ class SidraApiClient:
         n_cols = len(columns)
 
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Convertendo {n_rows} linhas x {n_cols} colunas", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Convertendo {n_rows} linhas x {n_cols} colunas", "SIDRA Connector", Qgis.MessageLevel.Info)
 
         if not rows:
             if QGIS_AVAILABLE:
-                QgsMessageLog.logMessage("Nenhum dado recebido", "SIDRA Connector", Qgis.Warning)
+                QgsMessageLog.logMessage("Nenhum dado recebido", "SIDRA Connector", Qgis.MessageLevel.Warning)
             return {}, {}
 
         sidra_data_dict = {}
@@ -211,7 +211,7 @@ class SidraApiClient:
                 value_cols.append(col)
 
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Colunas de valor: {value_cols}", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Colunas de valor: {value_cols}", "SIDRA Connector", Qgis.MessageLevel.Info)
 
         # Pega info descritiva da primeira linha (nomes das dimensoes)
         first_row = rows[0]
@@ -224,7 +224,7 @@ class SidraApiClient:
         geo_code_col = None
         if 'geo_code' not in col_set:
             if QGIS_AVAILABLE:
-                QgsMessageLog.logMessage("'geo_code' nao encontrado, procurando alternativa...", "SIDRA Connector", Qgis.Warning)
+                QgsMessageLog.logMessage("'geo_code' nao encontrado, procurando alternativa...", "SIDRA Connector", Qgis.MessageLevel.Warning)
 
             if 'D1C' in col_set:
                 geo_code_col = 'D1C'
@@ -234,7 +234,7 @@ class SidraApiClient:
                     geo_code_col = geo_candidates[0]
                 else:
                     if QGIS_AVAILABLE:
-                        QgsMessageLog.logMessage("Nenhuma coluna geografica encontrada!", "SIDRA Connector", Qgis.Critical)
+                        QgsMessageLog.logMessage("Nenhuma coluna geografica encontrada!", "SIDRA Connector", Qgis.MessageLevel.Critical)
                     return {}, header_info
 
             # Renomeia pra 'geo_code' em todas as linhas
@@ -259,7 +259,7 @@ class SidraApiClient:
         has_value_column = 'V' in col_set
 
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Coluna de variavel: {variable_column}", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Coluna de variavel: {variable_column}", "SIDRA Connector", Qgis.MessageLevel.Info)
 
         # Caminho 1: varias variaveis empilhadas na coluna V
         if variable_column and has_value_column:
@@ -309,7 +309,7 @@ class SidraApiClient:
             if single_var_name and QGIS_AVAILABLE:
                 QgsMessageLog.logMessage(
                     f"Variavel unica: '{single_var_name}'",
-                    "SIDRA Connector", Qgis.Info,
+                    "SIDRA Connector", Qgis.MessageLevel.Info,
                 )
 
             for row in rows:
@@ -333,11 +333,11 @@ class SidraApiClient:
                         rows_processed += 1
 
         if QGIS_AVAILABLE:
-            QgsMessageLog.logMessage(f"Pronto: {len(sidra_data_dict)} localidades, {rows_processed} linhas", "SIDRA Connector", Qgis.Info)
+            QgsMessageLog.logMessage(f"Pronto: {len(sidra_data_dict)} localidades, {rows_processed} linhas", "SIDRA Connector", Qgis.MessageLevel.Info)
             if len(sidra_data_dict) > 0:
                 sample_key = next(iter(sidra_data_dict.keys()))
                 sample_data = sidra_data_dict[sample_key]
                 variables = list(sample_data.keys())
-                QgsMessageLog.logMessage(f"Exemplo: {sample_key} -> {variables}", "SIDRA Connector", Qgis.Info)
+                QgsMessageLog.logMessage(f"Exemplo: {sample_key} -> {variables}", "SIDRA Connector", Qgis.MessageLevel.Info)
 
         return sidra_data_dict, header_info

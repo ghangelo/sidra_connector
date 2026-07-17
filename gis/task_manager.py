@@ -33,7 +33,7 @@ class FetchSidraDataTask(QgsTask):
     fetchError = pyqtSignal(str)
 
     def __init__(self, url):
-        super().__init__('A procurar dados da API SIDRA', QgsTask.CanCancel)
+        super().__init__('A procurar dados da API SIDRA', QgsTask.Flag.CanCancel)
         self.url = url
         self.exception = None
         self.sidra_data = None
@@ -42,7 +42,7 @@ class FetchSidraDataTask(QgsTask):
     def run(self):
         """Roda na thread de background -- faz a requisicao HTTP."""
         QgsMessageLog.logMessage(
-            f'Buscando dados de: {self.url}', 'SIDRA Connector', Qgis.Info
+            f'Buscando dados de: {self.url}', 'SIDRA Connector', Qgis.MessageLevel.Info
         )
         try:
             client = SidraApiClient(self.url)
@@ -51,25 +51,25 @@ class FetchSidraDataTask(QgsTask):
             if isinstance(self.sidra_data, dict):
                 QgsMessageLog.logMessage(
                     f'Recebidos {len(self.sidra_data)} registros',
-                    'SIDRA Connector', Qgis.Info,
+                    'SIDRA Connector', Qgis.MessageLevel.Info,
                 )
                 if self.sidra_data:
                     sample_keys = list(self.sidra_data.keys())[:3]
                     QgsMessageLog.logMessage(
                         f'Exemplo de codigos: {sample_keys}',
-                        'SIDRA Connector', Qgis.Info,
+                        'SIDRA Connector', Qgis.MessageLevel.Info,
                     )
             else:
                 QgsMessageLog.logMessage(
                     f'Tipo inesperado: {type(self.sidra_data)}',
-                    'SIDRA Connector', Qgis.Warning,
+                    'SIDRA Connector', Qgis.MessageLevel.Warning,
                 )
 
             return True
         except Exception as e:
             self.exception = str(e)
             QgsMessageLog.logMessage(
-                f'Erro: {e}', 'SIDRA Connector', Qgis.Critical
+                f'Erro: {e}', 'SIDRA Connector', Qgis.MessageLevel.Critical
             )
             return False
 
@@ -95,7 +95,7 @@ class DownloadAndLoadLayerTask(QgsTask):
     downloadError = pyqtSignal(str)
 
     def __init__(self, url, layer_name):
-        super().__init__(f'A baixar malha: {layer_name}', QgsTask.CanCancel)
+        super().__init__(f'A baixar malha: {layer_name}', QgsTask.Flag.CanCancel)
         self.url = url
         self.layer_name = layer_name
         self.exception = None

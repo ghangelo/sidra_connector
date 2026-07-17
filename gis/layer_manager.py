@@ -17,7 +17,7 @@ def get_project_vector_layers():
     layers = QgsProject.instance().mapLayers().values()
     return [
         lyr for lyr in layers
-        if isinstance(lyr, QgsVectorLayer) and lyr.wkbType() != QgsWkbTypes.NoGeometry
+        if isinstance(lyr, QgsVectorLayer) and lyr.wkbType() != QgsWkbTypes.Type.NoGeometry
     ]
 
 
