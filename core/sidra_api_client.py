@@ -18,7 +18,7 @@ import re
 try:
     import defusedxml.ElementTree as ET
 except ImportError:  # pragma: no cover
-    import xml.etree.ElementTree as ET  # noqa: S405
+    import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 -- intentional fallback, defusedxml unavailable
 
 from ..utils import constants
 
@@ -124,7 +124,7 @@ class SidraApiClient:
 
     def _parse_xml(self, xml_string: str) -> tuple:
         """Parseia resposta XML (formato antigo da API)."""
-        root = ET.fromstring(xml_string)
+        root = ET.fromstring(xml_string)  # nosec B314 -- ET is defusedxml.ElementTree when installed
         namespace = {'ns': 'http://schemas.datacontract.org/2004/07/IBGE.BTE.Tabela'}
 
         header_element = root.find('ns:ValorDescritoPorSuasDimensoes', namespace)
