@@ -12,8 +12,6 @@ from ..exceptions import (
 
 
 class SidraValuesService:
-    PERIOD_TOKEN = "/p/"
-
     def __init__(self, http_client, checkpoint_store=None):
         self.http_client = http_client
         self.checkpoint_store = checkpoint_store

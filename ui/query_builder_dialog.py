@@ -69,12 +69,13 @@ def build_search_query(search_term):
             params.extend([f"%{tok}%", f"%{tok}%"])
 
     where_clause = " AND ".join(where_parts) if where_parts else "1=1"
-    query = (
+    base_query = (
         "SELECT a.id, a.nome, g.nome as grupo_nome"
         " FROM agregados a"
         " JOIN grupos g ON a.grupo_id = g.id"
-        f" WHERE {where_clause} ORDER BY a.nome"
+        " WHERE "
     )
+    query = base_query + where_clause + " ORDER BY a.nome"  # nosec B608 -- parameterized placeholders only
     return query, params
 
 
