@@ -29,15 +29,8 @@ try:
     from qgis.core import QgsApplication, QgsBlockingNetworkRequest, QgsMessageLog, Qgis
 
     QGIS_AVAILABLE = True
-    try:
-        HTTP_STATUS_ATTR = QNetworkRequest.Attribute.HttpStatusCodeAttribute
-    except AttributeError:
-        HTTP_STATUS_ATTR = QNetworkRequest.HttpStatusCodeAttribute
-
-    try:
-        WARN_LEVEL = Qgis.MessageLevel.Warning
-    except AttributeError:
-        WARN_LEVEL = Qgis.Warning
+    HTTP_STATUS_ATTR = QNetworkRequest.Attribute.HttpStatusCodeAttribute
+    WARN_LEVEL = Qgis.MessageLevel.Warning
 except ImportError:
     QGIS_AVAILABLE = False
     QgsBlockingNetworkRequest = None
