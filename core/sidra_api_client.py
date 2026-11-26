@@ -9,58 +9,93 @@ fazer o join com a camada vetorial.
 Nao usa pandas -- tudo na mao com dicts e listas.
 """
 
-import requests
+import os
 import re
+import tempfile
 
 # Usa defusedxml para proteger contra ataques XML (XXE, billion laughs, etc.).
-# Faz fallback pro stdlib apenas se defusedxml nao estiver instalado --
-# nesse caso o parsing de XML fica vulneravel; instale defusedxml para corrigir.
 try:
     import defusedxml.ElementTree as ET
 except ImportError:  # pragma: no cover
-    import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 -- intentional fallback, defusedxml unavailable
+    import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 -- intentional fallback
 
-from ..utils import constants
+from ..constants import DEFAULT_PERIOD_BATCH_SIZE
+from ..exceptions import SidraQueryTooLargeError
+from ..infrastructure.checkpoint_store import JsonCheckpointStore
+from ..infrastructure.http_client import SidraHttpClient
+from ..services.sidra_values_service import SidraValuesService
 
-try:
-    from qgis.core import QgsMessageLog, Qgis
-    QGIS_AVAILABLE = True
-except ImportError:
-    QGIS_AVAILABLE = False
+IBGE_MISSING_SYMBOLS = {"...", "..", "X", "x"}
+IBGE_ZERO_SYMBOLS = {"-"}
+
+VALID_IBGE_UF_CODES = {
+    "11", "12", "13", "14", "15", "16", "17",
+    "21", "22", "23", "24", "25", "26", "27", "28", "29",
+    "31", "32", "33", "35",
+    "41", "42", "43",
+    "50", "51", "52", "53",
+}
+SUB_UF_LEVELS = {"6", "8", "9", "10", "11", "102"}
+
+
+def apply_uf_filter_to_url(url: str, uf_codes) -> str:
+    """Substitui /n{nivel}/all por /n{nivel}/in%20n3%20{ufs} em níveis subestaduais."""
+    if not url or not uf_codes:
+        return url
+
+    valid_ufs = sorted({
+        str(code).strip()
+        for code in uf_codes
+        if str(code).strip() in VALID_IBGE_UF_CODES
+    })
+    if not valid_ufs or len(valid_ufs) >= len(VALID_IBGE_UF_CODES):
+        return url
+
+    uf_list = ",".join(valid_ufs)
+
+    def _replace(match):
+        level = match.group(1)
+        if level in SUB_UF_LEVELS:
+            return f"/n{level}/in%20n3%20{uf_list}"
+        return match.group(0)
+
+    return re.sub(r"/n(\d+)/all(?=/|$|\?)", _replace, url, count=1, flags=re.IGNORECASE)
 
 
 def _notna(value):
     """Verifica se o valor nao eh None nem string vazia."""
-    return value is not None and value != ''
+    return value is not None and value != ""
 
 
 def _parse_numeric(value_str):
     """Tenta converter pra float, lidando com formato brasileiro (1.234,56).
 
-    Se nao conseguir, retorna a string original. Se for vazio, retorna None.
+    '-' segue a convencao do IBGE (zero absoluto -> 0.0).
+    '...', '..', 'X' retornam None.
     """
-    if value_str is None or value_str == '':
+    if value_str is None:
         return None
+    normalized = str(value_str).strip()
+    if not normalized or normalized in IBGE_MISSING_SYMBOLS:
+        return None
+    if normalized in IBGE_ZERO_SYMBOLS:
+        return 0.0
     try:
-        normalized = str(value_str).strip()
-        if ',' in normalized:
-            normalized = normalized.replace('.', '').replace(',', '.')
+        if "," in normalized:
+            normalized = normalized.replace(".", "").replace(",", ".")
         return float(normalized)
     except (ValueError, TypeError):
         return str(value_str) if _notna(value_str) else None
 
 
 class SidraApiClient:
-    """Busca dados tabulares da API SIDRA e transforma pra join.
+    """Busca dados tabulares da API SIDRA e transforma pra join."""
 
-    Aceita URL completa ou so o codigo da tabela.
-    """
-
-    def __init__(self, table_query):
+    def __init__(self, table_query, http_client=None, checkpoint_store=None):
         self.full_query_url = None
-        if isinstance(table_query, str) and table_query.startswith('http'):
+        if isinstance(table_query, str) and table_query.startswith("http"):
             self.full_query_url = table_query
-            match = re.search(r'/t/(\d+)', table_query)
+            match = re.search(r"/t/(\d+)", table_query)
             if match:
                 self.table_code = int(match.group(1))
             else:
@@ -69,10 +104,45 @@ class SidraApiClient:
             self.table_code = int(table_query)
 
         self.base_url = f"https://apisidra.ibge.gov.br/values/t/{self.table_code}"
+        self.http_client = http_client
+        self.checkpoint_store = checkpoint_store
 
-    def fetch_and_parse(self, params: dict = None) -> tuple:
-        """Faz a requisicao e retorna (dados, header_info)."""
+    def _fetch_raw_rows(self, client, url: str, feedback=None, progress_callback=None):
+        period_match = re.search(r"/p/([^/?#]+)", url, re.IGNORECASE)
+        periods = (
+            [p.strip() for p in period_match.group(1).split(",") if p.strip()]
+            if period_match
+            else []
+        )
 
+        if len(periods) > 1:
+            store = self.checkpoint_store
+            if store is None and self.http_client is None:
+                checkpoint_dir = os.path.join(
+                    tempfile.gettempdir(), "sidra_connector_checkpoints"
+                )
+                store = JsonCheckpointStore(checkpoint_dir)
+            values_service = SidraValuesService(client, checkpoint_store=store)
+            return values_service.collect(
+                query_url=url,
+                periods=periods,
+                batch_size=DEFAULT_PERIOD_BATCH_SIZE,
+                feedback=feedback,
+                progress_callback=progress_callback,
+            )
+
+        try:
+            return client.get_json(url, feedback=feedback)
+        except Exception as exc:
+            if SidraValuesService._is_query_too_large(exc):
+                raise SidraQueryTooLargeError(
+                    "A consulta excedeu o limite de 100.000 valores do SIDRA. "
+                    "Reduza as variáveis/categorias ou use uma camada de um estado específico."
+                ) from exc
+            raise
+
+    def fetch_and_parse(self, params: dict = None, feedback=None, progress_callback=None) -> tuple:
+        """Faz a requisicao (em lotes se necessario) e retorna (dados, header_info)."""
         if self.full_query_url:
             final_url = self.full_query_url
         else:
@@ -84,46 +154,19 @@ class SidraApiClient:
                 path_params = "/".join([f"{k}/{v}" for k, v in sanitized_params.items()])
                 final_url = f"{self.base_url}/{path_params}"
 
-        try:
-            response = requests.get(final_url, timeout=constants.API_TIMEOUT)
-            response.raise_for_status()
-        except requests.exceptions.Timeout:
-            raise TimeoutError(f"Timeout ao chamar a API: {final_url}")
-        except requests.exceptions.ConnectionError:
-            raise ConnectionError(f"Sem conexao com a API: {final_url}")
-        except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if e.response is not None else '?'
-            raise requests.exceptions.HTTPError(
-                f"Erro HTTP {status}: {final_url}",
-                response=e.response,
-            ) from e
-        except requests.exceptions.RequestException as e:
-            raise requests.exceptions.RequestException(f"Erro na requisicao: {e}")
-
-        content_type = (response.headers.get('Content-Type', '') or '').lower()
-        response_text = response.text or ''
-        normalized_text = response_text.strip().lower()
-        challenge_markers = (
-            'verify you are human',
-            'checking your browser',
-            'just a moment',
-            'browser challenge',
-            'cloudflare',
-            'cf-chl-',
-            'access denied',
+        client = self.http_client or SidraHttpClient()
+        data = self._fetch_raw_rows(
+            client, final_url, feedback=feedback, progress_callback=progress_callback
         )
-        if 'text/html' in content_type or normalized_text.startswith('<!doctype html') or normalized_text.startswith('<html') or any(marker in normalized_text for marker in challenge_markers):
-            raise ValueError(f"O endpoint do SIDRA respondeu com página de bloqueio: {final_url}")
 
-        # A API pode devolver XML (raro) ou JSON (padrao)
-        if content_type.startswith('application/xml'):
-            return self._parse_xml(response_text)
+        if (not data or len(data) <= 1) and re.search(r"/in%20n3%20[^/?#]+", final_url, re.IGNORECASE):
+            fallback_url = re.sub(
+                r"/in%20n3%20[^/?#]+", "/all", final_url, count=1, flags=re.IGNORECASE
+            )
+            data = self._fetch_raw_rows(
+                client, fallback_url, feedback=feedback, progress_callback=progress_callback
+            )
 
-        try:
-            data = response.json()
-        except ValueError as exc:
-            raise ValueError(f"Resposta da API não é JSON válido: {final_url}") from exc
-        # Primeira posicao eh sempre o cabecalho, dados comecam na segunda
         if not data or len(data) <= 1:
             return {}, {}
 
@@ -132,26 +175,27 @@ class SidraApiClient:
 
         columns = list(header.keys())
         table_data = [{col: row.get(col) for col in columns} for row in rows]
-
-        column_mapping = {k: v for k, v in header.items()}
-        sidra_data_dict, header_info = self._convert_rows_to_dict(table_data, columns, column_mapping)
-        return sidra_data_dict, header_info
+        column_mapping = dict(header.items())
+        return self._convert_rows_to_dict(table_data, columns, column_mapping)
 
     def _parse_xml(self, xml_string: str) -> tuple:
         """Parseia resposta XML (formato antigo da API)."""
-        root = ET.fromstring(xml_string)  # nosec B314 -- ET is defusedxml.ElementTree when installed
-        namespace = {'ns': 'http://schemas.datacontract.org/2004/07/IBGE.BTE.Tabela'}
+        root = ET.fromstring(xml_string)  # nosec B314
+        namespace = {"ns": "http://schemas.datacontract.org/2004/07/IBGE.BTE.Tabela"}
 
-        header_element = root.find('ns:ValorDescritoPorSuasDimensoes', namespace)
+        header_element = root.find("ns:ValorDescritoPorSuasDimensoes", namespace)
         if header_element is None:
             return {}, {}
 
-        header_map = {child.tag.split('}')[-1]: child.text for child in header_element}
-        data_elements = root.findall('ns:ValorDescritoPorSuasDimensoes', namespace)[1:]
+        header_map = {child.tag.split("}")[-1]: child.text for child in header_element}
+        data_elements = root.findall("ns:ValorDescritoPorSuasDimensoes", namespace)[1:]
 
         all_rows = []
         for elem in data_elements:
-            row_data = {header_map.get(child.tag.split('}')[-1], child.tag.split('}')[-1]): child.text for child in elem}
+            row_data = {
+                header_map.get(child.tag.split("}")[-1], child.tag.split("}")[-1]): child.text
+                for child in elem
+            }
             all_rows.append(row_data)
 
         if not all_rows:
@@ -159,20 +203,21 @@ class SidraApiClient:
 
         columns = list(all_rows[0].keys())
 
-        # Descobre qual coluna tem o codigo geografico
         geo_code_col = None
         niveis_geograficos = [
-            'brasil', 'grande regiao', 'unidade da federacao',
-            'regiao metropolitana', 'regiao integrada de desenvolvimento',
-            'microrregiao geografica', 'mesorregiao geografica',
-            'regiao geografica imediata', 'regiao geografica intermediaria',
-            'municipio', 'distrito', 'subdistrito', 'bairro', 'setor censitario'
+            "brasil", "grande regiao", "unidade da federacao",
+            "regiao metropolitana", "regiao integrada de desenvolvimento",
+            "microrregiao geografica", "mesorregiao geografica",
+            "regiao geografica imediata", "regiao geografica intermediaria",
+            "municipio", "distrito", "subdistrito", "bairro", "setor censitario",
         ]
 
         for i in range(1, 10):
-            dim_name = f'D{i}N'
-            dim_code = f'D{i}C'
-            if header_map.get(dim_name) and any(k in header_map[dim_name].lower() for k in niveis_geograficos):
+            dim_name = f"D{i}N"
+            dim_code = f"D{i}C"
+            if header_map.get(dim_name) and any(
+                k in header_map[dim_name].lower() for k in niveis_geograficos
+            ):
                 geo_code_col = header_map.get(dim_code)
                 break
 
@@ -180,149 +225,141 @@ class SidraApiClient:
             raise ValueError("Nao achei a coluna de codigo geografico no XML.")
 
         if geo_code_col in columns:
-            columns = ['geo_code' if c == geo_code_col else c for c in columns]
+            columns = ["geo_code" if c == geo_code_col else c for c in columns]
             for row in all_rows:
                 if geo_code_col in row:
-                    row['geo_code'] = row.pop(geo_code_col)
+                    row["geo_code"] = row.pop(geo_code_col)
 
         return self._convert_rows_to_dict(all_rows, columns, {})
 
     def _convert_rows_to_dict(self, rows: list, columns: list, column_labels: dict = None) -> tuple:
-        """Transforma as linhas da API no dicionario de lookup.
-
-        Se tem varias variaveis, agrupa por nome da variavel.
-        Se tem so uma, usa o nome dela (nao deixa ficar "V").
-        """
-        n_rows = len(rows)
-        n_cols = len(columns)
-
+        """Transforma as linhas da API no dicionario {geo_code: {coluna: valor}}."""
         if not rows:
             return {}, {}
 
         sidra_data_dict = {}
         header_info = {}
+        column_labels = column_labels or {}
 
-        # Colunas que sao metadados, nao valores numericos
-        excluded_cols = {
-            'geo_code',
-            'D1C', 'D1N', 'D2C', 'D2N', 'D3C', 'D3N', 'D4C', 'D4N',
-            'D5C', 'D5N', 'D6C', 'D6N', 'D7C', 'D7N',
-            'NC', 'NN', 'MC', 'MN',
-        }
-
+        dim_cols = {c for c in columns if re.match(r"^D\d+[CN]$", c)}
+        excluded_cols = {"geo_code", "NC", "NN", "MC", "MN"} | dim_cols
         col_set = set(columns)
 
-        # Descobre quais colunas tem valores numericos
         value_cols = []
-        if 'V' in col_set:
-            value_cols.append('V')
+        if "V" in col_set:
+            value_cols.append("V")
         for col in columns:
             if col not in excluded_cols and col not in value_cols:
                 value_cols.append(col)
 
-        # Pega info descritiva da primeira linha (nomes das dimensoes)
         first_row = rows[0]
         for col in columns:
-            if col.endswith('N'):
+            if col.endswith("N"):
                 val = first_row.get(col)
                 header_info[col] = val if _notna(val) else col
 
-        # Acha a coluna de codigo geografico
-        geo_code_col = None
-        if 'geo_code' not in col_set:
-            if 'D1C' in col_set:
-                geo_code_col = 'D1C'
-            else:
-                geo_candidates = [col for col in columns if col.endswith('C') and any(dim in col for dim in ['D1', 'D2', 'D3', 'D4'])]
-                if geo_candidates:
-                    geo_code_col = geo_candidates[0]
-                else:
-                    return {}, header_info
+        # Identifica coluna de codigo geografico (e seu par de nome D{i}N)
+        geo_name_col = None
+        if "geo_code" not in col_set:
+            geo_code_col = None
+            nn_label = str(first_row.get("NN") or "").strip().lower()
+            if nn_label and column_labels:
+                for col in columns:
+                    if re.match(r"^D\d+N$", col):
+                        lbl = str(column_labels.get(col) or "").strip().lower()
+                        if lbl == nn_label:
+                            candidate_c = col[:-1] + "C"
+                            if candidate_c in col_set:
+                                geo_code_col = candidate_c
+                                geo_name_col = col
+                                break
 
-            # Renomeia pra 'geo_code' em todas as linhas
+            if geo_code_col is None:
+                if "D1C" in col_set:
+                    geo_code_col = "D1C"
+                    geo_name_col = "D1N"
+                else:
+                    geo_candidates = [col for col in columns if re.match(r"^D\d+C$", col)]
+                    if geo_candidates:
+                        geo_code_col = geo_candidates[0]
+                        geo_name_col = geo_code_col[:-1] + "N"
+                    else:
+                        return {}, header_info
+
             for row in rows:
                 if geo_code_col in row:
-                    row['geo_code'] = row.pop(geo_code_col)
+                    row["geo_code"] = row.pop(geo_code_col)
 
-        rows_processed = 0
+        # Todas as dimensoes nao-geograficas que possuem mais de 1 valor unico
+        non_geo_dim_names = [
+            col for col in columns
+            if re.match(r"^D\d+N$", col) and col != geo_name_col
+        ]
+        varying_dims = [
+            col for col in non_geo_dim_names
+            if len({row.get(col) for row in rows if _notna(row.get(col))}) > 1
+        ]
 
-        # Procura coluna de variavel (a que tem mais de 1 valor unico)
-        # Ordem de prioridade: D4N > D3N > D2N > D5N > D6N > D7N
-        variable_column = None
-        variable_candidates = ['D4N', 'D3N', 'D2N', 'D5N', 'D6N', 'D7N']
+        has_value_column = "V" in col_set
 
-        for candidate in variable_candidates:
-            if candidate in col_set:
-                unique_values = len(set(row.get(candidate) for row in rows))
-                if unique_values > 1:
-                    variable_column = candidate
-                    break
-
-        has_value_column = 'V' in col_set
-
-        # Caminho 1: varias variaveis empilhadas na coluna V
-        if variable_column and has_value_column:
+        if varying_dims and has_value_column:
             for row in rows:
-                gc = row.get('geo_code')
-                if _notna(gc):
-                    geo_code = str(gc).strip()
-                    var_val = row.get(variable_column)
-                    variable_name = str(var_val).strip() if _notna(var_val) else 'Valor'
-                    value = row.get('V')
+                gc = row.get("geo_code")
+                if not _notna(gc):
+                    continue
+                geo_code = str(gc).strip()
+                parts = [
+                    str(row.get(dim_col)).strip()
+                    for dim_col in varying_dims
+                    if _notna(row.get(dim_col))
+                ]
+                variable_name = "_".join(parts) if parts else "Valor"
+                processed_value = _parse_numeric(row.get("V"))
 
-                    if geo_code not in sidra_data_dict:
-                        sidra_data_dict[geo_code] = {}
+                if geo_code not in sidra_data_dict:
+                    sidra_data_dict[geo_code] = {}
 
-                    processed_value = _parse_numeric(value)
+                var_key = variable_name
+                counter = 1
+                while var_key in sidra_data_dict[geo_code]:
+                    var_key = f"{variable_name}_{counter}"
+                    counter += 1
 
-                    # Se ja existe essa variavel pro mesmo geo_code, adiciona sufixo
-                    var_key = variable_name
-                    counter = 1
-                    while var_key in sidra_data_dict[geo_code]:
-                        var_key = f"{variable_name}_{counter}"
-                        counter += 1
-
-                    sidra_data_dict[geo_code][var_key] = processed_value
-                    rows_processed += 1
+                sidra_data_dict[geo_code][var_key] = processed_value
         else:
-            # Caminho 2: so 1 variavel (ou nenhuma coluna de agrupamento)
-            # Nesse caso, tenta descobrir o nome da variavel pelo header
-            # pra nao ficar uma coluna generica chamada "V"
             single_var_name = None
-            if has_value_column and not variable_column and column_labels:
-                # Procura no header qual coluna eh rotulada "Variavel"
+            if has_value_column and column_labels:
                 var_col = None
-                for candidate in variable_candidates:
-                    label = str(column_labels.get(candidate, '')).lower()
-                    if 'ariavel' in label or 'ariável' in label:
+                for candidate in non_geo_dim_names:
+                    label = str(column_labels.get(candidate, "")).lower()
+                    if "ariavel" in label or "ariável" in label:
                         var_col = candidate
                         break
 
                 if var_col and var_col in col_set:
-                    unique_vals = set(row.get(var_col) for row in rows)
-                    unique_vals.discard(None)
-                    unique_vals.discard('')
+                    unique_vals = {
+                        row.get(var_col) for row in rows if _notna(row.get(var_col))
+                    }
                     if len(unique_vals) == 1:
                         single_var_name = str(next(iter(unique_vals))).strip()
 
             for row in rows:
-                gc = row.get('geo_code')
-                if _notna(gc):
-                    geo_code = str(gc).strip()
+                gc = row.get("geo_code")
+                if not _notna(gc):
+                    continue
+                geo_code = str(gc).strip()
 
-                    row_data = {}
-                    for col in value_cols:
-                        val = row.get(col)
-                        if _notna(val):
-                            # Usa o nome real da variavel em vez de "V"
-                            key = single_var_name if (col == 'V' and single_var_name) else col
-                            row_data[key] = _parse_numeric(val)
+                row_data = {}
+                for col in value_cols:
+                    val = row.get(col)
+                    if _notna(val):
+                        key = single_var_name if (col == "V" and single_var_name) else col
+                        row_data[key] = _parse_numeric(val)
 
-                    if row_data:
-                        if geo_code in sidra_data_dict:
-                            sidra_data_dict[geo_code].update(row_data)
-                        else:
-                            sidra_data_dict[geo_code] = row_data
-                        rows_processed += 1
+                if row_data:
+                    if geo_code in sidra_data_dict:
+                        sidra_data_dict[geo_code].update(row_data)
+                    else:
+                        sidra_data_dict[geo_code] = row_data
 
         return sidra_data_dict, header_info

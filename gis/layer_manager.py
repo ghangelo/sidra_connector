@@ -64,8 +64,11 @@ def file_layer_to_memory(file_layer, name):
     mem_provider.addAttributes(file_layer.fields().toList())
     mem_layer.updateFields()
 
-    # Copia feicoes (geometria + atributos)
-    mem_provider.addFeatures(file_layer.getFeatures())
+    # Copia feicoes fechando explicitamente o iterador OGR para liberar o .dbf no Windows
+    iterator = file_layer.getFeatures()
+    features = list(iterator)
+    iterator.close()
+    mem_provider.addFeatures(features)
     mem_layer.updateExtents()
 
     return mem_layer if mem_layer.isValid() else None

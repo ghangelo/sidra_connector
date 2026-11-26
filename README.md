@@ -23,66 +23,65 @@ Este projeto visa otimizar o fluxo de trabalho de análise geoespacial, eliminan
 
 ## Funcionalidades
 
-*   **Assistente de Busca:** Pesquise tabelas do IBGE por nome ou ID com busca dinâmica em tempo real e construa URLs da API de forma interativa e guiada.
-*   **Download de Malhas Vetoriais:** Baixe malhas territoriais (municípios, estados, etc.) do IBGE como camadas no QGIS.
-*   **União de Dados:** Vincule os dados estatísticos baixados do SIDRA com as camadas vetoriais correspondentes de forma automática.
+*   **Assistente de Busca:** Pesquise tabelas do IBGE por nome, sigla (ex.: PIB, VAB, PAM, PPM, IPCA) ou ID com busca dinâmica em tempo real e construa a consulta de forma guiada.
+*   **Download de Malhas Vetoriais:** Baixe malhas territoriais (municípios, estados, regiões imediatas/intermediárias, etc.) do IBGE diretamente como camadas no QGIS.
+*   **Recorte Automático e União de Dados:** Detecta automaticamente as UFs da camada alvo para otimizar a consulta no SIDRA e vincula as estatísticas em uma nova camada vetorial com aliases legíveis.
 
 ## Como Usar
 
 1.  **Abra o Plugin:** Clique no ícone do SIDRA Connector para abrir a janela principal.
-
-### Opção 1: Usando o Assistente de Busca (Recomendado)
-2.  **Buscar Tabela:** Clique no botão "Buscar Tabela..." para abrir o assistente.
-3.  **Pesquisar:** Digite o nome, palavras-chave ou o ID numérico da tabela e veja os resultados aparecerem em tempo real (ex: "população", "PIB", "5938").
-4.  **Selecionar:** Clique na tabela desejada da lista de resultados.
+2.  **Download da Malha (opcional):** Baixe uma malha vetorial correspondente usando a seção "1. Baixar Malha do IBGE" ou utilize uma camada já carregada no projeto.
+3.  **Buscar Tabela:** Clique no botão **"Buscar Tabela..."** para abrir o assistente.
+4.  **Pesquisar:** Digite o nome, palavras-chave, sigla ou o ID numérico da tabela (ex.: "pib municipios", "população", "5938") e selecione a tabela nos resultados.
 5.  **Configurar:** Siga os diálogos interativos para selecionar:
     - Períodos (anos/meses)
-    - Nível geográfico (Estados, Municípios, etc.)
+    - Nível geográfico (Brasil, Estados, Municípios, etc.)
     - Variáveis da tabela
     - Categorias das classificações
-6.  **URL Automática:** A URL da API será gerada e inserida automaticamente.
-
-### Opção 2: URL Manual
-2.  **URL da API:** Cole diretamente uma URL da API do SIDRA no campo correspondente.
-
-### Finalização
-7.  **Download da Malha:** Opcionalmente, baixe uma malha vetorial correspondente usando a seção "Download de Malha".
-8.  **Selecionar Camada:** Escolha uma camada vetorial já carregada no seu projeto.
-9.  **Executar União:** Clique em "Unir à Camada Alvo" para processar e criar a nova camada com os dados unidos.
+6.  **Selecionar Camada e Campo:** Escolha a camada vetorial e o campo de código IBGE na seção "3. Unir Dados à Camada".
+7.  **Executar União:** Clique em **"Unir à Camada"** para gerar a nova camada em memória com os dados unidos.
 
 ## Estrutura do Projeto
 
 ```
 sidra_connector/
-├── __init__.py          # Ponto de entrada do plugin
-├── plugin.py            # Classe principal registrada no QGIS
-├── metadata.txt         # Metadados do plugin
-├── core/                # Lógica de negócio
+├── __init__.py              # Ponto de entrada do plugin
+├── plugin.py                # Classe principal registrada no QGIS
+├── metadata.txt             # Metadados do plugin
+├── exceptions.py            # Exceções tipadas do plugin
+├── core/                    # Lógica de negócio
 │   ├── api_helpers.py       # Busca de metadados e montagem de URL
 │   ├── data_joiner.py       # União de dados SIDRA com camadas vetoriais
 │   ├── mesh_downloader.py   # Download e extração de malhas do IBGE
 │   └── sidra_api_client.py  # Cliente da API SIDRA (Python puro)
-├── gis/                 # Integração com QGIS
+├── gis/                     # Integração com QGIS
 │   ├── layer_manager.py     # Gerenciamento de camadas
 │   └── task_manager.py      # Tarefas assíncronas (QgsTask)
-├── ui/                  # Interface do usuário
+├── infrastructure/          # Rede QGIS e checkpoints locais
+│   ├── checkpoint_store.py  # Persistência atômica de lotes em JSON
+│   └── http_client.py       # Cliente HTTP via QgsBlockingNetworkRequest
+├── services/                # Serviços de metadados e lotes adaptativos
+│   ├── sidra_metadata_service.py
+│   └── sidra_values_service.py
+├── ui/                      # Interface do usuário
 │   ├── custom_widgets.py        # Widgets personalizados
-│   ├── main_dialog.py          # Lógica do diálogo principal
-│   ├── main_dialog_base.ui     # Layout do diálogo (Qt Designer)
-│   └── query_builder_dialog.py # Assistente de busca de tabelas
-├── utils/               # Utilitários
-│   └── constants.py         # Constantes (UFs, URLs, timeouts)
-└── dev/                 # Ferramentas de desenvolvimento
-    └── criar_db.py          # Script para gerar agregados_ibge.db
+│   ├── main_dialog.py           # Lógica do diálogo principal
+│   ├── main_dialog_base.ui      # Layout do diálogo (Qt Designer)
+│   └── query_builder_dialog.py  # Assistente de busca de tabelas
+├── utils/                   # Utilitários
+│   └── constants.py         # Constantes (UFs, URLs, níveis, timeouts)
+└── dev/                     # Ferramentas de desenvolvimento e empacotamento
+    ├── criar_db.py          # Script para gerar agregados_ibge.db
+    └── empacotar.py         # Script para gerar sidra_connector.zip
 ```
 
 ## Contribuições
 
-Contribuições são bem-vindas! Se você encontrar um bug ou tiver uma sugestão, por favor, abra uma [issue](https://github.com/GaboV3/sidra_connector/issues).
+Contribuições são bem-vindas! Se você encontrar um bug ou tiver uma sugestão, por favor, abra uma [issue](https://github.com/ghangelo/sidra_connector/issues).
 
 ## Autor
 
-*   **Gabriel Henrique Angelo** - [GaboV3](https://github.com/GaboV3)
+*   **Gabriel Henrique Angelo** - [ghangelo](https://github.com/ghangelo)
 
 ## Licença
 

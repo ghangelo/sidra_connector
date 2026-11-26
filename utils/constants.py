@@ -2,8 +2,8 @@
 """
 Constantes usadas pelo plugin todo.
 
-Tem os mapeamentos de UF, tipos de malha, URLs do IBGE
-e configuracoes de timeout.
+Tem os mapeamentos de UF, tipos de malha, níveis territoriais,
+URLs do IBGE e configurações de timeout.
 """
 
 # UFs do Brasil (nome -> sigla)
@@ -28,6 +28,37 @@ MALHAS = {
     "Regiões Geográficas Intermediárias": "RG_Intermediarias",
     "País": "Pais",
 }
+
+# Malhas que só existem no escopo nacional ("Brasil")
+MALHAS_BRASIL_ONLY = {"País", "Grandes Regiões"}
+
+# Códigos oficiais de níveis territoriais do SIDRA/IBGE (N{id} -> Nome)
+SIDRA_TERRITORIAL_LEVELS = {
+    1: "Brasil",
+    2: "Grande Região",
+    3: "Unidade da Federação",
+    6: "Município",
+    7: "Região Metropolitana",
+    8: "Mesorregião Geográfica",
+    9: "Microrregião Geográfica",
+    10: "Distrito",
+    11: "Subdistrito",
+    13: "Região Metropolitana e Subdivisão",
+    14: "Região Integrada de Desenvolvimento (RIDE)",
+    15: "Aglomeração Urbana",
+    17: "Aglomerado Subnormal",
+    18: "Área de Ponderação",
+    23: "Arranjo Populacional",
+    24: "Região Geográfica Intermediária",
+    25: "Região Geográfica Imediata",
+    102: "Bairro",
+    131: "Amazônia Legal",
+    134: "Semiárido",
+}
+
+SIDRA_PREFERRED_LEVEL_ORDER = (
+    1, 2, 3, 6, 7, 8, 9, 24, 25, 10, 11, 102, 13, 14, 15, 23, 17, 18, 131, 134,
+)
 
 # URLs do GeoFTP do IBGE
 IBGE_MESH_BASE_URL_PARENT = (
@@ -54,7 +85,7 @@ HTTP_RETRY_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 DEFAULT_PERIOD_BATCH_SIZE = 12
 MAX_RESPONSE_BYTES = 100 * 1024 * 1024
 PLUGIN_USER_AGENT = (
-    "SIDRA-Connector-QGIS/2.3 "
+    "SIDRA-Connector-QGIS/2.2.3 "
     "(https://github.com/ghangelo/sidra_connector)"
 )
 CHECKPOINT_SCHEMA_VERSION = 1

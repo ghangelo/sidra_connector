@@ -8,6 +8,9 @@ camada com as colunas do SIDRA adicionadas. A camada original
 nao eh alterada.
 """
 
+import re
+import unicodedata
+
 from qgis.core import (
     QgsVectorLayer,
     QgsField,
@@ -24,16 +27,62 @@ except (ImportError, AttributeError):
     from qgis.PyQt.QtCore import QVariant
     DOUBLE_TYPE = QVariant.Double
 
+MAX_FIELD_LEN = 60
+
+
+def _sanitize_segment(text):
+    nfkd = unicodedata.normalize("NFKD", str(text))
+    ascii_text = "".join(c for c in nfkd if not unicodedata.combining(c))
+    safe = ascii_text.encode("ascii", "ignore").decode("ascii").lower()
+    safe = safe.replace(" - ", "_").replace(" ", "_").replace("/", "_").replace("-", "_")
+    safe = re.sub(r"[^a-z0-9_]+", "_", safe)
+    return re.sub(r"_+", "_", safe).strip("_")
+
+
+def _sanitize_and_fit_field_name(raw_name, max_len=MAX_FIELD_LEN):
+    raw_parts = [p for p in str(raw_name).split("_") if p.strip()]
+    clean_parts = [s for s in (_sanitize_segment(p) for p in raw_parts) if s]
+    safe = "_".join(clean_parts) or "valor"
+
+    if len(safe) <= max_len:
+        return safe
+
+    # Preserva o último segmento de dimensão completo (ex: 0_a_4_anos, 2020) dentro de 24 chars
+    if len(clean_parts) >= 2:
+        last_seg = clean_parts[-1]
+        if last_seg and len(last_seg) <= 24:
+            prefix = "_".join(clean_parts[:-1])
+            budget = max_len - len(last_seg) - 1
+            if budget >= 1:
+                return f"{prefix[:budget].rstrip('_')}_{last_seg}"
+
+    return safe[:max_len]
+
+
+def _format_field_alias(raw_name):
+    parts = [part.strip() for part in str(raw_name).split("_") if part.strip()]
+    if not parts:
+        return str(raw_name).strip()
+    return " — ".join(parts)
+
+
+def _normalize_join_key(raw_key):
+    if raw_key is None:
+        return None
+    if isinstance(raw_key, int):
+        return str(raw_key)
+    if isinstance(raw_key, float):
+        return str(int(raw_key)) if raw_key.is_integer() else str(raw_key)
+    text = str(raw_key).strip()
+    if not text:
+        return None
+    return re.sub(r"^(\d+)\.0+$", r"\1", text)
+
 
 class DataJoiner:
-    """Junta dados tabulares do SIDRA a uma camada vetorial.
-
-    Cria uma camada nova em memoria com todos os campos originais
-    mais as colunas dos dados do SIDRA.
-    """
+    """Junta dados tabulares do SIDRA a uma camada vetorial."""
 
     def __init__(self, target_layer, join_field_name, sidra_data, header_info):
-        """Valida os parametros antes de fazer qualquer coisa."""
         if not isinstance(target_layer, QgsVectorLayer):
             raise TypeError("Isso nao eh uma camada vetorial valida.")
 
@@ -59,54 +108,39 @@ class DataJoiner:
         self.header_info = header_info if header_info else {}
 
     def join_data(self):
-        """Faz o join e retorna a camada nova com estatisticas.
-
-        Retorna (camada_nova, qtd_unidas, nao_encontradas, chaves_exemplo).
-        """
-        # Monta o schema: campos originais + campos novos do SIDRA
+        """Faz o join e retorna (camada_nova, qtd_unidas, nao_encontradas, chaves_exemplo)."""
         new_fields = QgsFields()
+        used_field_names_lower = set()
         for field in self.target_layer.fields():
             new_fields.append(field)
+            used_field_names_lower.add(field.name().lower())
 
-        # Pega todos os nomes de variavel que aparecem nos dados
         all_class_values = sorted(
-            list(set(k for item in self.sidra_data.values() for k in item.keys()))
+            {k for item in self.sidra_data.values() for k in item.keys()}
         )
 
-
-        # Cria nomes de campo seguros pro QGIS (sem espaco, sem acento esquisito)
         field_map = {}
-        used_field_names = set()
+        field_aliases = {}
 
         for class_value in all_class_values:
-            safe_class = str(class_value).lower()
-            safe_class = safe_class.replace(' - ', '_').replace(' ', '_').replace('/', '_')
-            safe_class = safe_class.replace('(', '').replace(')', '').replace('-', '_')
+            original_field_name = _sanitize_and_fit_field_name(class_value)
+            field_name = original_field_name
 
-            base_name = safe_class[:40]
-            field_name = f"{base_name}"
-
-            # QGIS aceita no maximo 63 chars
-            if len(field_name) > 60:
-                field_name = field_name[:60]
-
-            # Garante que nao repete nome
             counter = 1
-            original_field_name = field_name
-            while field_name in used_field_names:
-                field_name = f"{original_field_name}_{counter}"
+            while field_name.lower() in used_field_names_lower:
+                suffix = f"_{counter}"
+                base = original_field_name[: MAX_FIELD_LEN - len(suffix)]
+                field_name = f"{base}{suffix}"
                 counter += 1
-                if len(field_name) > 60:
-                    trim = len(field_name) - 60
-                    field_name = f"{original_field_name[:-trim]}_{counter - 1}"
 
-            used_field_names.add(field_name)
-
-            if new_fields.indexFromName(field_name) == -1:
-                new_fields.append(QgsField(field_name, DOUBLE_TYPE))
+            alias = _format_field_alias(class_value)
+            used_field_names_lower.add(field_name.lower())
+            qgs_field = QgsField(field_name, DOUBLE_TYPE)
+            qgs_field.setAlias(alias)
+            new_fields.append(qgs_field)
             field_map[class_value] = field_name
+            field_aliases[field_name] = alias
 
-        # Cria a camada de resultado em memoria
         temp_layer = QgsVectorLayer(
             f"{QgsWkbTypes.displayString(self.target_layer.wkbType())}",
             f"{self.target_layer.name()}_sidra",
@@ -117,7 +151,11 @@ class DataJoiner:
         provider.addAttributes(new_fields)
         temp_layer.updateFields()
 
-        # Percorre cada feicao e tenta achar no dicionario do SIDRA
+        for field_name, alias in field_aliases.items():
+            idx = temp_layer.fields().indexFromName(field_name)
+            if idx != -1:
+                temp_layer.setFieldAlias(idx, alias)
+
         join_count = 0
         unmatched_keys_sample = []
         layer_keys_sample = []
@@ -126,23 +164,14 @@ class DataJoiner:
         for feature in self.target_layer.getFeatures():
             new_feat = QgsFeature(new_fields)
             new_feat.setGeometry(feature.geometry())
-            for i, field in enumerate(feature.fields()):
+            for i in range(len(feature.fields())):
                 new_feat.setAttribute(i, feature.attribute(i))
 
-            raw_key = feature[self.join_field_name]
-
-            # Normaliza: tira .0 de float, strip de string
-            normalized_layer_key = None
-            if raw_key is not None:
-                try:
-                    normalized_layer_key = str(int(float(raw_key)))
-                except (ValueError, TypeError):
-                    normalized_layer_key = str(raw_key).strip()
+            normalized_layer_key = _normalize_join_key(feature[self.join_field_name])
 
             if len(layer_keys_sample) < 5 and normalized_layer_key:
                 layer_keys_sample.append(normalized_layer_key)
 
-            # Procura esse codigo no dicionario do SIDRA
             if normalized_layer_key and normalized_layer_key in self.sidra_data:
                 join_count += 1
                 for class_value, data_value in self.sidra_data[normalized_layer_key].items():
@@ -157,7 +186,6 @@ class DataJoiner:
 
             new_features.append(new_feat)
 
-        # Insere tudo de uma vez (muito mais rapido que uma por uma)
         provider.addFeatures(new_features)
         temp_layer.updateExtents()
 

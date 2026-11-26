@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>500</width>
-    <height>480</height>
+    <width>520</width>
+    <height>510</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -74,9 +74,16 @@
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_2">
       <item>
+       <widget class="QCheckBox" name="chk_manual_url">
+        <property name="text">
+         <string>Inserir/editar URL da API manualmente</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QLabel" name="label">
         <property name="text">
-         <string>URL da API SIDRA:</string>
+         <string>URL da API SIDRA (automática ou manual):</string>
         </property>
         <property name="wordWrap">
          <bool>true</bool>
@@ -88,6 +95,9 @@
       </item>
       <item>
        <widget class="QLineEdit" name="le_api_url">
+        <property name="placeholderText">
+         <string>Cole uma URL da API SIDRA ou clique em 'Buscar Tabela...' abaixo</string>
+        </property>
         <property name="visible">
          <bool>false</bool>
         </property>

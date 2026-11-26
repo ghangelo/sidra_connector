@@ -13,10 +13,69 @@ pra puxar os metadados depois.
 
 import os
 import sqlite3
-from qgis.PyQt import QtWidgets, QtCore
-from qgis.PyQt.QtCore import QThread, pyqtSignal
+import unicodedata
 
-from ..core.api_helpers import get_metadata_from_api, montar_url_interativa
+from qgis.PyQt import QtCore, QtWidgets
+
+from ..core.api_helpers import montar_url_interativa
+from ..gis import task_manager
+
+IBGE_SEARCH_ACRONYMS = {
+    "pib": "produto interno bruto",
+    "vab": "valor adicionado bruto",
+    "pam": "producao agricola municipal",
+    "ppm": "pesquisa da pecuaria municipal",
+    "pevs": "extracao vegetal e da silvicultura",
+    "ipca": "indice nacional de precos ao consumidor amplo",
+    "inpc": "indice nacional de precos ao consumidor",
+    "pnad": "pesquisa nacional por amostra de domicilios",
+}
+
+
+def normalize_search_text(texto):
+    """Remove acentos e converte para minúsculas para busca no SQLite."""
+    if texto is None:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", str(texto))
+    sem_acento = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return sem_acento.lower()
+
+
+def build_search_query(search_term):
+    """Monta a query SQL e parâmetros para busca por ID ou palavras/siglas."""
+    term = str(search_term or "").strip()
+    if term.isdigit():
+        query = """
+            SELECT a.id, a.nome, g.nome as grupo_nome
+            FROM agregados a
+            JOIN grupos g ON a.grupo_id = g.id
+            WHERE CAST(a.id AS TEXT) LIKE ?
+            ORDER BY a.id
+        """
+        return query, [f"{term}%"]
+
+    tokens = normalize_search_text(term).split()
+    where_parts = []
+    params = []
+    for tok in tokens:
+        expanded = IBGE_SEARCH_ACRONYMS.get(tok)
+        if expanded:
+            where_parts.append(
+                "(norm(a.nome) LIKE ? OR norm(g.nome) LIKE ? OR norm(a.nome) LIKE ? OR norm(g.nome) LIKE ?)"
+            )
+            params.extend([f"%{tok}%", f"%{tok}%", f"%{expanded}%", f"%{expanded}%"])
+        else:
+            where_parts.append("(norm(a.nome) LIKE ? OR norm(g.nome) LIKE ?)")
+            params.extend([f"%{tok}%", f"%{tok}%"])
+
+    where_clause = " AND ".join(where_parts) if where_parts else "1=1"
+    query = (
+        "SELECT a.id, a.nome, g.nome as grupo_nome"
+        " FROM agregados a"
+        " JOIN grupos g ON a.grupo_id = g.id"
+        f" WHERE {where_clause} ORDER BY a.nome"
+    )
+    return query, params
 
 
 def _format_option_label(item_name, item_id):
@@ -39,8 +98,8 @@ def _format_option_label(item_name, item_id):
 
     return f"{label} (ID: {id_text})".strip()
 
-# Qt5 vs Qt6 -- o QGIS 3.40+ usa Qt6, antes era Qt5.
-# Esses try/except garantem que funciona nos dois.
+
+# Qt5 vs Qt6
 try:
     USER_ROLE = QtCore.Qt.ItemDataRole.UserRole
 except AttributeError:
@@ -57,20 +116,6 @@ except AttributeError:
     DIALOG_ACCEPTED = QtWidgets.QDialog.Accepted
 
 
-class _MetadataWorker(QThread):
-    """Thread que busca os metadados de uma tabela sem travar a tela."""
-
-    resultReady = pyqtSignal(object)
-
-    def __init__(self, table_id, parent=None):
-        super().__init__(parent)
-        self.table_id = table_id
-
-    def run(self):
-        result = get_metadata_from_api(self.table_id)
-        self.resultReady.emit(result)
-
-
 class QueryBuilderDialog(QtWidgets.QDialog):
     """Assistente pra montar a URL da API SIDRA passo a passo."""
 
@@ -79,6 +124,7 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.plugin_dir = plugin_dir
         self.generated_url = None
         self.selected_table_id = None
+        self._metadata_feedback = None
 
         self.setup_ui()
         self.connect_signals()
@@ -141,8 +187,6 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.perform_search)
 
-        self._metadata_worker = None
-
         self.le_search.textChanged.connect(self.on_search_text_changed)
         self.btn_clear.clicked.connect(self.clear_search)
         self.list_results.itemClicked.connect(self.on_table_selected)
@@ -151,12 +195,15 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.btn_ok.clicked.connect(self.accept)
 
     def closeEvent(self, event):
-        """Se a thread de metadados ainda ta rodando, mata antes de fechar."""
-        if self._metadata_worker is not None and self._metadata_worker.isRunning():
-            self._metadata_worker.resultReady.disconnect(self._on_metadata_ready)
-            self._metadata_worker.terminate()
-            self._metadata_worker.wait(3000)
+        """Cancela cooperativamente a requisição de metadados sem matar threads à força."""
+        if self._metadata_feedback is not None:
+            self._metadata_feedback.cancel()
         super().closeEvent(event)
+
+    def reject(self):
+        if self._metadata_feedback is not None:
+            self._metadata_feedback.cancel()
+        super().reject()
 
     def get_db_connection(self):
         """Abre o banco SQLite com as tabelas do SIDRA."""
@@ -182,9 +229,7 @@ class QueryBuilderDialog(QtWidgets.QDialog):
             return None
 
     def on_search_text_changed(self):
-        """A cada tecla, reseta o timer de 500ms pra nao buscar frenetico."""
         search_text = self.le_search.text().strip()
-
         self.search_timer.stop()
 
         if not search_text:
@@ -196,14 +241,12 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.search_timer.start(500)
 
     def clear_search(self):
-        """Limpa o campo e a lista, volta ao estado inicial."""
         self.le_search.clear()
         self.list_results.clear()
         self.lbl_status.setText("")
         self.lbl_status.setStyleSheet("color: gray; font-style: italic;")
 
     def perform_search(self):
-        """Dispara a busca de fato (chamado pelo timer)."""
         search_term = self.le_search.text().strip()
         if not search_term:
             return
@@ -212,16 +255,7 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.search_tables(search_term)
 
     def search_tables(self, search_term=None):
-        """Pesquisa no banco local, sem precisar de acento e em qualquer ordem.
-
-        Funciona assim: o termo eh quebrado em palavras, e TODAS precisam
-        aparecer no nome da tabela ou do grupo. Entao "populacao municipio"
-        acha a mesma coisa que "municipio populacao".
-
-        Se digitar so numeros, busca por ID (prefixo).
-        """
-        import unicodedata
-
+        """Pesquisa no banco local, sem precisar de acento e em qualquer ordem."""
         if search_term is None:
             search_term = self.le_search.text().strip()
 
@@ -232,54 +266,14 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         if not conn:
             return
 
-        def _normalizar(texto):
-            """Tira acentos e passa pra minusculo -- usada dentro do SQLite."""
-            if texto is None:
-                return ''
-            nfkd = unicodedata.normalize('NFKD', str(texto))
-            sem_acento = ''.join(c for c in nfkd if not unicodedata.combining(c))
-            return sem_acento.lower()
-
         try:
-            # Registra a funcao Python direto no SQLite pra poder usar nas queries
-            conn.create_function('norm', 1, _normalizar)
+            conn.create_function("norm", 1, normalize_search_text)
             cursor = conn.cursor()
 
-            is_numeric = search_term.isdigit()
-
-            if is_numeric:
-                query = """
-                    SELECT a.id, a.nome, g.nome as grupo_nome
-                    FROM agregados a
-                    JOIN grupos g ON a.grupo_id = g.id
-                    WHERE CAST(a.id AS TEXT) LIKE ?
-                    ORDER BY a.id
-                """
-                cursor.execute(query, (f"{search_term}%",))
-            else:
-                # Cada palavra vira um filtro AND -- todas tem que bater
-                tokens = _normalizar(search_term).split()
-
-                where_parts = []
-                params = []
-                for tok in tokens:
-                    where_parts.append(
-                        "(norm(a.nome) LIKE ? OR norm(g.nome) LIKE ?)"
-                    )
-                    params.extend([f"%{tok}%", f"%{tok}%"])
-
-                where_clause = ' AND '.join(where_parts)
-                base_query = (
-                    "SELECT a.id, a.nome, g.nome as grupo_nome"
-                    " FROM agregados a"
-                    " JOIN grupos g ON a.grupo_id = g.id"
-                    " WHERE "
-                )
-                query = base_query + where_clause + " ORDER BY a.nome"
-                cursor.execute(query, params)
+            query, params = build_search_query(search_term)
+            cursor.execute(query, params)
 
             results = cursor.fetchall()
-
             self.list_results.clear()
 
             if results:
@@ -300,18 +294,12 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         except sqlite3.Error as e:
             self.lbl_status.setText(f"Erro na busca: {e}")
             self.lbl_status.setStyleSheet("color: red;")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Ops!",
-                f"Deu problema na busca: {e}"
-            )
+            QtWidgets.QMessageBox.critical(self, "Ops!", f"Deu problema na busca: {e}")
         finally:
             conn.close()
 
     def on_table_selected(self, item):
-        """Quando o usuario clica numa tabela da lista."""
         table_id = item.data(USER_ROLE)
-
         if table_id is None:
             return
 
@@ -320,32 +308,44 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         self.btn_build_query.setEnabled(True)
 
     def build_query(self):
-        """Puxa os metadados da tabela escolhida (em background)."""
+        """Puxa os metadados da tabela escolhida via QgsTask cancelável."""
         if self.selected_table_id is None:
             QtWidgets.QMessageBox.warning(self, "Atenção", "Escolhe uma tabela da lista antes.")
             return
 
+        if self._metadata_feedback is not None:
+            self._metadata_feedback.cancel()
+
         self.btn_build_query.setEnabled(False)
         self.btn_build_query.setText("Carregando detalhes...")
 
-        self._metadata_worker = _MetadataWorker(
-            str(self.selected_table_id), parent=self
+        self._metadata_feedback = task_manager.run_metadata_task(
+            str(self.selected_table_id),
+            self._on_metadata_ready,
+            self._on_metadata_error,
         )
-        self._metadata_worker.resultReady.connect(self._on_metadata_ready)
-        self._metadata_worker.start()
+
+    def _on_metadata_error(self, error_message):
+        self._metadata_feedback = None
+        try:
+            self.btn_build_query.setEnabled(True)
+            self.btn_build_query.setText("Construir Consulta")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Sem conexão",
+                f"Não consegui buscar os detalhes dessa tabela.\n{error_message}",
+            )
+        except RuntimeError:
+            pass
 
     def _on_metadata_ready(self, metadata):
-        """Metadados chegaram -- agora percorre as 4 etapas de selecao.
-
-        1. Periodos (ex: 2020, 2021, 2022...)
-        2. Nivel geografico (municipio, UF, etc.)
-        3. Variaveis (o que voce quer medir)
-        4. Categorias de cada classificacao (sexo, idade, etc.)
-
-        No final monta a URL e fecha o dialogo.
-        """
-        self.btn_build_query.setEnabled(True)
-        self.btn_build_query.setText("Construir Consulta")
+        """Metadados chegaram -- agora percorre as 4 etapas de selecao."""
+        self._metadata_feedback = None
+        try:
+            self.btn_build_query.setEnabled(True)
+            self.btn_build_query.setText("Construir Consulta")
+        except RuntimeError:
+            return
 
         if not metadata:
             QtWidgets.QMessageBox.critical(
@@ -358,89 +358,87 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         try:
             # 1) Periodos
             periodos_disponiveis = [
-                (p.get('Id'), p.get('Nome'), p.get('Codigo'))
-                for p in metadata.get('Periodos', {}).get('Periodos', [])
+                (p.get("Id"), p.get("Nome"), p.get("Codigo"))
+                for p in metadata.get("Periodos", {}).get("Periodos", [])
             ]
             periodos_selecionados = self.show_selection_dialog(
                 "Selecione o(s) Periodo(s)",
-                periodos_disponiveis
+                periodos_disponiveis,
             )
             if not periodos_selecionados:
                 return
 
             # 2) Nivel geografico
-            # O dicionario de niveis traduz os IDs pra nomes legiveis
-            territorios = metadata.get('Territorios', {})
-            dic_niveis = territorios.get('DicionarioNiveis', {})
+            territorios = metadata.get("Territorios", {})
+            dic_niveis = territorios.get("DicionarioNiveis", {})
             nivel_nome_map = dict(zip(
-                dic_niveis.get('Ids', []),
-                dic_niveis.get('Nomes', [])
+                dic_niveis.get("Ids", []),
+                dic_niveis.get("Nomes", []),
             ))
             niveis_disponiveis = [
-                (n.get('Id'), nivel_nome_map.get(n.get('Id'), n.get('Sigla', '?')), n.get('Sigla', ''))
-                for n in territorios.get('NiveisTabela', [])
+                (n.get("Id"), nivel_nome_map.get(n.get("Id"), n.get("Sigla", "?")), n.get("Sigla", ""))
+                for n in territorios.get("NiveisTabela", [])
             ]
             nivel_selecionado = self.show_selection_dialog(
                 "Selecione o Nivel Geografico",
                 niveis_disponiveis,
-                single_selection=True
+                single_selection=True,
             )
             if not nivel_selecionado:
                 return
 
-            # 3) Variaveis (inclui as derivadas, tipo percentual, variacao etc.)
+            # 3) Variaveis
             variaveis_disponiveis = []
-            for var in metadata.get('Variaveis', []):
+            for var in metadata.get("Variaveis", []):
                 unidade = ""
-                if isinstance(var.get('UnidadeDeMedida'), list):
-                    if var.get('UnidadeDeMedida'):
-                        unidade = var.get('UnidadeDeMedida')[0].get('Unidade', '')
+                if isinstance(var.get("UnidadeDeMedida"), list):
+                    if var.get("UnidadeDeMedida"):
+                        unidade = var.get("UnidadeDeMedida")[0].get("Unidade", "")
                 else:
-                    unidade = var.get('UnidadeDeMedida', '')
+                    unidade = var.get("UnidadeDeMedida", "")
 
-                variaveis_disponiveis.append((var.get('Id'), var.get('Nome'), unidade))
+                variaveis_disponiveis.append((var.get("Id"), var.get("Nome"), unidade))
 
-                for derivada in var.get('VariaveisDerivadas', []):
-                    unidade_derivada = derivada.get('UnidadeDeMedida', '')
+                for derivada in var.get("VariaveisDerivadas", []):
+                    unidade_derivada = derivada.get("UnidadeDeMedida", "")
                     variaveis_disponiveis.append(
-                        (derivada.get('Id'), f"  \u2514\u2500 {derivada.get('Nome')}", unidade_derivada)
+                        (derivada.get("Id"), f"  \u2514\u2500 {derivada.get('Nome')}", unidade_derivada)
                     )
 
             variaveis_selecionadas = self.show_selection_dialog(
                 "Selecione a(s) Variavel(is)",
-                variaveis_disponiveis
+                variaveis_disponiveis,
             )
             if not variaveis_selecionadas:
                 return
 
             # 4) Categorias por classificacao (se houver)
             classificacoes_selecionadas = {}
-            for classif in metadata.get('Classificacoes', []):
-                class_id = classif.get('Id')
-                class_nome = classif.get('Nome')
+            for classif in metadata.get("Classificacoes", []):
+                class_id = classif.get("Id")
+                class_nome = classif.get("Nome")
 
                 categorias_disponiveis = []
-                for cat in classif.get('Categorias', []):
-                    indentacao = "  " * cat.get('IdentacaoApresentacao', 0)
+                for cat in classif.get("Categorias", []):
+                    indentacao = "  " * cat.get("IdentacaoApresentacao", 0)
                     categorias_disponiveis.append(
-                        (cat.get('Id'), f"{indentacao}{cat.get('Nome')}")
+                        (cat.get("Id"), f"{indentacao}{cat.get('Nome')}")
                     )
 
                 if categorias_disponiveis:
                     categorias_selecionadas = self.show_selection_dialog(
                         f"Selecione categorias para: {class_nome}",
-                        categorias_disponiveis
+                        categorias_disponiveis,
                     )
                     if categorias_selecionadas:
                         classificacoes_selecionadas[class_id] = [item[0] for item in categorias_selecionadas]
 
-            # Tudo selecionado, monta a URL e fecha
             self.generated_url = montar_url_interativa(
                 self.selected_table_id,
                 nivel_selecionado[0],
                 variaveis_selecionadas,
                 periodos_selecionados,
-                classificacoes_selecionadas
+                classificacoes_selecionadas,
             )
 
             self.accept()
@@ -453,18 +451,11 @@ class QueryBuilderDialog(QtWidgets.QDialog):
             )
 
     def show_selection_dialog(self, title, options, single_selection=False):
-        """Abre uma janelinha pra escolher itens de uma lista.
-
-        O botao OK so fica clicavel depois de selecionar pelo menos 1 item.
-        Se for single_selection, so deixa escolher 1.
-        Retorna lista de tuplas ou None se cancelar.
-        """
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle(title)
         dialog.setFixedSize(500, 400)
 
         layout = QtWidgets.QVBoxLayout(dialog)
-
         list_widget = QtWidgets.QListWidget()
 
         for option in options:
@@ -492,7 +483,6 @@ class QueryBuilderDialog(QtWidgets.QDialog):
 
         layout.addLayout(button_layout)
 
-        # So libera o OK quando tem algo selecionado
         def _on_selection_changed():
             btn_ok.setEnabled(len(list_widget.selectedItems()) > 0)
 
@@ -509,5 +499,4 @@ class QueryBuilderDialog(QtWidgets.QDialog):
         return None
 
     def get_generated_url(self):
-        """Retorna a URL montada, ou None se o usuario cancelou no meio."""
         return self.generated_url

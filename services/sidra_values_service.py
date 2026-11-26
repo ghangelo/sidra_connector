@@ -3,7 +3,12 @@
 import re
 from urllib.parse import urlsplit, urlunsplit
 
-from ..exceptions import SidraHttpError, SidraInvalidResponseError, SidraQueryTooLargeError
+from ..exceptions import (
+    SidraCancelledError,
+    SidraHttpError,
+    SidraInvalidResponseError,
+    SidraQueryTooLargeError,
+)
 
 
 class SidraValuesService:
@@ -25,7 +30,7 @@ class SidraValuesService:
 
         for index, batch in enumerate(batches):
             if feedback is not None and feedback.isCanceled():
-                break
+                raise SidraCancelledError("Operação cancelada pelo usuário.")
 
             batch_key = self._batch_key(query_url, batch)
             cached = self._read_checkpoint(batch_key)
@@ -44,11 +49,16 @@ class SidraValuesService:
         return self._merge_rows(all_rows)
 
     def _download_adaptive(self, query_url, periods, feedback=None):
+        if feedback is not None and feedback.isCanceled():
+            raise SidraCancelledError("Operação cancelada pelo usuário.")
+
         batch_url = self.replace_periods(query_url, periods)
 
         try:
             payload = self.http_client.get_json(batch_url, feedback=feedback)
             return self._validate_values_payload(payload)
+        except SidraCancelledError:
+            raise
         except Exception as exc:
             if not self._is_query_too_large(exc):
                 raise
@@ -95,9 +105,8 @@ class SidraValuesService:
 
     @staticmethod
     def _is_query_too_large(exc):
-        if isinstance(exc, SidraHttpError):
-            if exc.status_code in {413, 414}:
-                return True
+        if isinstance(exc, SidraHttpError) and exc.status_code in {413, 414}:
+            return True
 
         message = str(exc).lower()
         indicators = (
@@ -111,6 +120,8 @@ class SidraValuesService:
             "query will result",
             "consulta resultará",
             "excede o limite",
+            "excedeu o limite",
+            "quantidade de valores solicitados",
         )
 
         return any(indicator in message for indicator in indicators)

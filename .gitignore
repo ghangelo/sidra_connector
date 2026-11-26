@@ -1,5 +1,10 @@
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
 dev/*.db
 agregados_ibge_completo.db
+sidra_connector.zip
+symbology-style.db
+qgis.db
+qgis-auth.db
